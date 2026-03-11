@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List
 
-from framework.node import Node
+from eagle_eye_de.node import Node
 
 
 @dataclass
