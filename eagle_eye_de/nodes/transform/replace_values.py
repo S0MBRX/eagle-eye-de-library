@@ -1,4 +1,4 @@
-from eagle_eye_de.node import NodeResult
+from eagle_eye_de.nodes  import NodeResult
 
 
 class ReplaceValuesNode:

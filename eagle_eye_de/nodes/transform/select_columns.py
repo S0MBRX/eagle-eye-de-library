@@ -1,4 +1,4 @@
-from eagle_eye_de.nodes  import NodeResult
+from eagle_eye_de.node import NodeResult
 
 
 class ColumnFilterNode:
@@ -20,7 +20,7 @@ class ColumnFilterNode:
 
         Data = Data.copy()
 
-        MissingColumns = [Column for Column in self.Columns if Column not in Data.columns]
+        MissingColumns = [C for C in self.Columns if C not in Data.columns]
 
         if self.Mode == "include":
             if MissingColumns:
@@ -29,7 +29,7 @@ class ColumnFilterNode:
             Data = Data[self.Columns]
 
         elif self.Mode == "exclude":
-            ExistingColumns = [Column for Column in self.Columns if Column in Data.columns]
+            ExistingColumns = [C for C in self.Columns if C in Data.columns]
             Data = Data.drop(columns=ExistingColumns)
 
         Metrics = {
