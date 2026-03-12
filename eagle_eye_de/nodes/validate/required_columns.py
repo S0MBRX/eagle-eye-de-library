@@ -1,6 +1,3 @@
-from eagle_eye_de.nodes  import NodeResult
-
-
 class ValidateRequiredColumnsNode:
     Name = "ValidateRequiredColumns"
 
@@ -19,16 +16,10 @@ class ValidateRequiredColumnsNode:
         if MissingColumns:
             raise ValueError(f"ValidateRequiredColumnsNode missing columns: {MissingColumns}")
 
-        Metrics = {
-            "RequiredColumnCount": len(self.Columns),
-            "MissingColumnCount": 0,
-        }
-
         if Ctx:
-            Ctx.Log("ValidateRequiredColumnsEnd", RequiredColumnCount=len(self.Columns))
+            Ctx.Log(
+                "ValidateRequiredColumnsEnd",
+                RequiredColumnCount=len(self.Columns)
+            )
 
-        return NodeResult(
-            Data=Data,
-            Metrics=Metrics,
-            Warnings=[]
-        )
+        return Data

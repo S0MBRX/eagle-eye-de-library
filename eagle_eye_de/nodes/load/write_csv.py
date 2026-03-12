@@ -1,6 +1,3 @@
-from eagle_eye_de.nodes  import NodeResult
-
-
 class WriteCsvNode:
     Name = "WriteCsv"
 
@@ -20,17 +17,12 @@ class WriteCsvNode:
 
         Data.to_csv(self.Path, index=self.Index)
 
-        Metrics = {
-            "OutputPath": self.Path,
-            "RowsWritten": Rows,
-            "ColumnsWritten": Columns,
-        }
-
         if Ctx:
-            Ctx.Log("WriteCsvEnd", Path=self.Path, RowsWritten=Rows)
+            Ctx.Log(
+                "WriteCsvEnd",
+                Path=self.Path,
+                RowsWritten=Rows,
+                ColumnsWritten=Columns,
+            )
 
-        return NodeResult(
-            Data=Data,
-            Metrics=Metrics,
-            Warnings=[]
-        )
+        return Data

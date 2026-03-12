@@ -1,6 +1,3 @@
-from eagle_eye_de.nodes  import NodeResult
-
-
 class GenerateColumnNode:
     Name = "GenerateColumn"
 
@@ -47,12 +44,6 @@ class GenerateColumnNode:
 
         Data[self.NewColumn] = Result
 
-        Metrics = {
-            "NewColumn": self.NewColumn,
-            "Operator": self.Operator,
-            "SourceColumnCount": len(self.Columns),
-        }
-
         if Ctx:
             Ctx.Log(
                 "GenerateColumnEnd",
@@ -60,8 +51,4 @@ class GenerateColumnNode:
                 SourceColumnCount=len(self.Columns),
             )
 
-        return NodeResult(
-            Data=Data,
-            Metrics=Metrics,
-            Warnings=[]
-        )
+        return Data

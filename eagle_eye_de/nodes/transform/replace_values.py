@@ -1,6 +1,3 @@
-from eagle_eye_de.nodes  import NodeResult
-
-
 class ReplaceValuesNode:
     Name = "ReplaceValues"
 
@@ -20,13 +17,6 @@ class ReplaceValuesNode:
         Data = Data.replace(self.ReplaceMap)
         ReplacedEstimateAfter = Data.isin(list(self.ReplaceMap.keys())).sum().sum()
 
-        Metrics = {
-            "ReplaceRuleCount": len(self.ReplaceMap),
-            "ValuesMatchedBefore": int(ReplacedEstimateBefore),
-            "ValuesMatchedAfter": int(ReplacedEstimateAfter),
-            "ValuesReplacedEstimate": int(ReplacedEstimateBefore - ReplacedEstimateAfter),
-        }
-
         if Ctx:
             Ctx.Log(
                 "ReplaceValuesEnd",
@@ -34,8 +24,4 @@ class ReplaceValuesNode:
                 ValuesReplacedEstimate=int(ReplacedEstimateBefore - ReplacedEstimateAfter),
             )
 
-        return NodeResult(
-            Data=Data,
-            Metrics=Metrics,
-            Warnings=[]
-        )
+        return Data

@@ -1,6 +1,3 @@
-from eagle_eye_de.nodes  import NodeResult
-
-
 class RowFilterNode:
     Name = "RowFilter"
 
@@ -22,18 +19,7 @@ class RowFilterNode:
         RowsAfter = len(Data)
         RowsRemoved = RowsBefore - RowsAfter
 
-        Metrics = {
-            "Condition": self.Condition,
-            "RowsBefore": RowsBefore,
-            "RowsAfter": RowsAfter,
-            "RowsRemoved": RowsRemoved,
-        }
-
         if Ctx:
             Ctx.Log("RowFilterEnd", RowsAfter=RowsAfter, RowsRemoved=RowsRemoved)
 
-        return NodeResult(
-            Data=Data,
-            Metrics=Metrics,
-            Warnings=[]
-        )
+        return Data

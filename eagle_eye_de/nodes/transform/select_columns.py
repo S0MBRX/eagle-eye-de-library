@@ -1,6 +1,3 @@
-from eagle_eye_de.node import NodeResult
-
-
 class ColumnFilterNode:
     Name = "ColumnFilter"
 
@@ -25,28 +22,18 @@ class ColumnFilterNode:
         if self.Mode == "include":
             if MissingColumns:
                 raise ValueError(f"ColumnFilterNode missing columns: {MissingColumns}")
-
             Data = Data[self.Columns]
 
         elif self.Mode == "exclude":
             ExistingColumns = [C for C in self.Columns if C in Data.columns]
             Data = Data.drop(columns=ExistingColumns)
 
-        Metrics = {
-            "Mode": self.Mode,
-            "ColumnCount": len(Data.columns),
-            "RowCount": len(Data),
-        }
-
-        Warnings = []
-        if MissingColumns and self.Mode == "exclude":
-            Warnings.append(f"Columns not found and not excluded: {MissingColumns}")
-
         if Ctx:
-            Ctx.Log("ColumnFilterEnd", Mode=self.Mode, ColumnCount=len(Data.columns))
+            Ctx.Log(
+                "ColumnFilterEnd",
+                Mode=self.Mode,
+                ColumnCount=len(Data.columns),
+                RowCount=len(Data),
+            )
 
-        return NodeResult(
-            Data=Data,
-            Metrics=Metrics,
-            Warnings=Warnings
-        )
+        return Data

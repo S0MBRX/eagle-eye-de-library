@@ -1,6 +1,3 @@
-from eagle_eye_de.nodes  import NodeResult
-
-
 class NormalizeColumnsNode:
     Name = "NormalizeColumns"
 
@@ -23,16 +20,11 @@ class NormalizeColumnsNode:
             1 for Old, New in zip(OriginalColumns, Data.columns) if str(Old) != str(New)
         )
 
-        Metrics = {
-            "ColumnCount": len(Data.columns),
-            "ColumnsChanged": ChangedCount,
-        }
-
         if Ctx:
-            Ctx.Log("NormalizeColumnsEnd", ColumnCount=len(Data.columns), ColumnsChanged=ChangedCount)
+            Ctx.Log(
+                "NormalizeColumnsEnd",
+                ColumnCount=len(Data.columns),
+                ColumnsChanged=ChangedCount
+            )
 
-        return NodeResult(
-            Data=Data,
-            Metrics=Metrics,
-            Warnings=[]
-        )
+        return Data

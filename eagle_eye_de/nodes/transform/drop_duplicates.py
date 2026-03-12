@@ -1,6 +1,3 @@
-from eagle_eye_de.nodes  import NodeResult
-
-
 class DropDuplicatesNode:
     Name = "DropDuplicates"
 
@@ -23,17 +20,7 @@ class DropDuplicatesNode:
         RowsAfter = len(Data)
         RowsRemoved = RowsBefore - RowsAfter
 
-        Metrics = {
-            "RowsBefore": RowsBefore,
-            "RowsAfter": RowsAfter,
-            "RowsRemoved": RowsRemoved,
-        }
-
         if Ctx:
             Ctx.Log("DropDuplicatesEnd", RowsRemoved=RowsRemoved)
 
-        return NodeResult(
-            Data=Data,
-            Metrics=Metrics,
-            Warnings=[]
-        )
+        return Data
