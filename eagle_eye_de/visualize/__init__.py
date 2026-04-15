@@ -1,5 +1,3 @@
-from .tkinter_viewer import ShowRunReportViewer
+from .tkinter_viewer import LaunchVisualizer
 
-__all__ = [
-    "ShowRunReportViewer",
-]
+__all__ = ["LaunchVisualizer"]
