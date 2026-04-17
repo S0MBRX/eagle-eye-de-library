@@ -1,25 +1,23 @@
 def LaunchVisualizer():
     import ast
+    import os
+    import time
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
 
-    from eagle_eye_de import Pipeline
     from eagle_eye_de.nodes import (
-        ExtractCsvNode,
         NormalizeColumnsNode,
         ReplaceValuesNode,
         DropDuplicatesNode,
         ColumnFilterNode,
         ValidateRequiredColumnsNode,
-        WriteCsvNode,
     )
 
     root = tk.Tk()
     root.title("EagleEyeDE Visualizer")
     root.geometry("500x500")
-    root.configure(bg="#5B6E8A")  # storm blue
+    root.configure(bg="#5B6E8A")
 
-    # STYLE
     style = ttk.Style()
     try:
         style.theme_use("clam")
@@ -54,12 +52,8 @@ def LaunchVisualizer():
         foreground=[("active", "white"), ("pressed", "white")],
     )
 
-    style.configure(
-        "Small.TButton",
-        padding=(6, 3),
-    )
+    style.configure("Small.TButton", padding=(6, 3))
 
-    # STATE
     input_var = tk.StringVar()
 
     normalize_var = tk.BooleanVar(value=True)
@@ -75,10 +69,26 @@ def LaunchVisualizer():
     validate_rows = []
 
     preview_window = None
-    preview_tree = None
+    preview_table_state = {}
     preview_info_var = tk.StringVar(value="No preview loaded.")
+    preview_selected_value_var = tk.StringVar(value="")
+    preview_selected_entry = None
 
-    # HELPERS
+    processed_window = None
+    processed_table_state = {}
+    processed_selected_entry = None
+    processed_selected_value_var = tk.StringVar(value="")
+    processed_title_var = tk.StringVar(value="Processed Table")
+    processed_diag_var = tk.StringVar(value="")
+    processed_legend_var = tk.StringVar(
+        value="Green = added cells | Orange = modified cells"
+    )
+
+    processed_steps = []
+    processed_step_index = 0
+    processed_play_job = None
+    processed_is_playing = False
+
     def choose_input():
         path = filedialog.askopenfilename(
             title="Choose Input CSV",
@@ -106,20 +116,179 @@ def LaunchVisualizer():
 
     def toggle_section(var, section_frame):
         show_section(section_frame, var.get())
-        if input_var.get().strip():
-            refresh_preview()
 
-    # PREVIEW HELPERS
+    def get_input_filename():
+        input_path = input_var.get().strip()
+        if not input_path:
+            return "CSV Preview"
+        return os.path.basename(input_path)
+
+    def get_processed_output_path():
+        input_path = input_var.get().strip()
+        if not input_path:
+            return None
+
+        folder = os.path.dirname(input_path)
+        filename = os.path.basename(input_path)
+        stem, ext = os.path.splitext(filename)
+        if not ext:
+            ext = ".csv"
+        return os.path.join(folder, f"Processed_{stem}{ext}")
+
+    def get_processed_output_filename():
+        output_path = get_processed_output_path()
+        if not output_path:
+            return "Processed Table"
+        return os.path.basename(output_path)
+
+    def set_selected_cell_value(value_var, entry_widget, value, auto_select=False):
+        value_var.set(str(value))
+        if entry_widget is not None:
+            entry_widget.focus_set()
+            if auto_select:
+                entry_widget.selection_range(0, tk.END)
+
+    def create_canvas_table(parent, selected_value_var, selected_entry_getter):
+        outer = ttk.Frame(parent, style="Storm.TFrame")
+        outer.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(
+            outer,
+            bg="white",
+            highlightthickness=0,
+            bd=0
+        )
+        canvas.grid(row=0, column=0, sticky="nsew")
+
+        yscroll = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        yscroll.grid(row=0, column=1, sticky="ns")
+        canvas.configure(yscrollcommand=yscroll.set)
+
+        xscroll = ttk.Scrollbar(outer, orient="horizontal", command=canvas.xview)
+        xscroll.grid(row=1, column=0, sticky="ew")
+        canvas.configure(xscrollcommand=xscroll.set)
+
+        inner = tk.Frame(canvas, bg="white")
+        window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def on_inner_configure(event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def on_canvas_configure(event):
+            canvas.itemconfigure(window_id, width=max(event.width, inner.winfo_reqwidth()))
+
+        inner.bind("<Configure>", on_inner_configure)
+        canvas.bind("<Configure>", on_canvas_configure)
+
+        return {
+            "outer": outer,
+            "canvas": canvas,
+            "inner": inner,
+            "selected_value_var": selected_value_var,
+            "selected_entry_getter": selected_entry_getter,
+        }
+
+    def render_canvas_table(table_state, df, cell_colors=None):
+        inner = table_state["inner"]
+
+        for child in inner.winfo_children():
+            child.destroy()
+
+        if df is None or df.empty:
+            tk.Label(
+                inner,
+                text="No rows to display.",
+                bg="white",
+                fg="black",
+                anchor="w",
+                padx=6,
+                pady=4,
+            ).grid(row=0, column=0, sticky="w")
+            table_state["canvas"].configure(scrollregion=table_state["canvas"].bbox("all"))
+            return
+
+        display_df = df.copy()
+
+        for column_name in display_df.columns:
+            display_df[column_name] = display_df[column_name].map(
+                lambda v: "" if v is None else str(v)
+            )
+
+        columns = list(display_df.columns)
+
+        header_bg = "#d7e3f0"
+        default_bg = "white"
+        added_bg = "#d9f5d9"
+        modified_bg = "#ffe7c2"
+
+        for col_index, column_name in enumerate(columns):
+            header = tk.Label(
+                inner,
+                text=str(column_name),
+                bg=header_bg,
+                fg="black",
+                relief="solid",
+                bd=1,
+                anchor="w",
+                padx=6,
+                pady=4,
+                font=("Arial", 9, "bold"),
+            )
+            header.grid(row=0, column=col_index, sticky="nsew")
+            inner.grid_columnconfigure(col_index, weight=1, minsize=120)
+
+        for row_index, (_, row) in enumerate(display_df.iterrows(), start=1):
+            for col_index, column_name in enumerate(columns):
+                cell_value = row[column_name]
+                bg = default_bg
+
+                if cell_colors is not None:
+                    color_key = (row_index - 1, column_name)
+                    if color_key in cell_colors:
+                        if cell_colors[color_key] == "added":
+                            bg = added_bg
+                        elif cell_colors[color_key] == "modified":
+                            bg = modified_bg
+
+                cell = tk.Label(
+                    inner,
+                    text=cell_value,
+                    bg=bg,
+                    fg="black",
+                    relief="solid",
+                    bd=1,
+                    anchor="w",
+                    justify="left",
+                    padx=6,
+                    pady=4,
+                )
+                cell.grid(row=row_index, column=col_index, sticky="nsew")
+
+                def handle_click(event, value=cell_value, auto_select=False):
+                    entry_widget = table_state["selected_entry_getter"]()
+                    set_selected_cell_value(
+                        table_state["selected_value_var"],
+                        entry_widget,
+                        value,
+                        auto_select=auto_select
+                    )
+
+                cell.bind("<Button-1>", lambda event, value=cell_value: handle_click(event, value=value, auto_select=False))
+                cell.bind("<Double-1>", lambda event, value=cell_value: handle_click(event, value=value, auto_select=True))
+
+        table_state["canvas"].configure(scrollregion=table_state["canvas"].bbox("all"))
+
     def ensure_preview_window():
-        nonlocal preview_window, preview_tree
+        nonlocal preview_window, preview_selected_entry, preview_table_state
 
         if preview_window is not None and preview_window.winfo_exists():
+            preview_window.title(get_input_filename())
             preview_window.lift()
             return
 
         preview_window = tk.Toplevel(root)
-        preview_window.title("CSV Preview")
-        preview_window.geometry("900x500")
+        preview_window.title(get_input_filename())
+        preview_window.geometry("900x560")
         preview_window.configure(bg=storm_blue)
 
         preview_frame = ttk.Frame(preview_window, padding=10, style="Storm.TFrame")
@@ -131,116 +300,326 @@ def LaunchVisualizer():
             style="StormTop.TLabel"
         ).pack(anchor="w", pady=(0, 8))
 
-        tree_frame = ttk.Frame(preview_frame)
-        tree_frame.pack(fill="both", expand=True)
+        table_holder = ttk.Frame(preview_frame, style="Storm.TFrame")
+        table_holder.pack(fill="both", expand=True)
 
-        preview_tree = ttk.Treeview(tree_frame, show="headings")
-        preview_tree.grid(row=0, column=0, sticky="nsew")
+        preview_table_state = create_canvas_table(
+            table_holder,
+            preview_selected_value_var,
+            lambda: preview_selected_entry
+        )
 
-        yscroll = ttk.Scrollbar(tree_frame, orient="vertical", command=preview_tree.yview)
-        yscroll.grid(row=0, column=1, sticky="ns")
-        preview_tree.configure(yscrollcommand=yscroll.set)
+        selected_frame = ttk.Frame(preview_frame, style="Storm.TFrame")
+        selected_frame.pack(fill="x", pady=(10, 0))
 
-        xscroll = ttk.Scrollbar(tree_frame, orient="horizontal", command=preview_tree.xview)
-        xscroll.grid(row=1, column=0, sticky="ew")
-        preview_tree.configure(xscrollcommand=xscroll.set)
+        ttk.Label(
+            selected_frame,
+            text="Selected Cell",
+            style="StormTop.TLabel"
+        ).pack(anchor="w", pady=(0, 4))
 
-        tree_frame.rowconfigure(0, weight=1)
-        tree_frame.columnconfigure(0, weight=1)
+        preview_selected_entry = tk.Entry(selected_frame, textvariable=preview_selected_value_var)
+        preview_selected_entry.pack(fill="x")
 
-    def build_preview_dataframe():
+    def ensure_processed_window():
+        nonlocal processed_window, processed_selected_entry, processed_table_state
+
+        if processed_window is not None and processed_window.winfo_exists():
+            processed_window.title(get_processed_output_filename())
+            processed_window.lift()
+            return
+
+        processed_window = tk.Toplevel(root)
+        processed_window.title(get_processed_output_filename())
+        processed_window.geometry("1050x700")
+        processed_window.configure(bg=storm_blue)
+
+        processed_frame = ttk.Frame(processed_window, padding=10, style="Storm.TFrame")
+        processed_frame.pack(fill="both", expand=True)
+
+        ttk.Label(
+            processed_frame,
+            textvariable=processed_title_var,
+            style="StormTop.TLabel"
+        ).pack(anchor="w", pady=(0, 6))
+
+        ttk.Label(
+            processed_frame,
+            textvariable=processed_diag_var,
+            style="StormTop.TLabel",
+            justify="left",
+            wraplength=980
+        ).pack(anchor="w", pady=(0, 6))
+
+        ttk.Label(
+            processed_frame,
+            textvariable=processed_legend_var,
+            style="StormTop.TLabel",
+            justify="left",
+            wraplength=980
+        ).pack(anchor="w", pady=(0, 8))
+
+        controls_frame = ttk.Frame(processed_frame, style="Storm.TFrame")
+        controls_frame.pack(fill="x", pady=(0, 8))
+
+        ttk.Button(
+            controls_frame,
+            text="Previous",
+            style="Small.TButton",
+            command=show_previous_processed_step
+        ).pack(side="left", padx=(0, 6))
+
+        ttk.Button(
+            controls_frame,
+            text="Replay",
+            style="Small.TButton",
+            command=toggle_processed_playback
+        ).pack(side="left", padx=(0, 6))
+
+        ttk.Button(
+            controls_frame,
+            text="Next",
+            style="Small.TButton",
+            command=show_next_processed_step
+        ).pack(side="left", padx=(0, 6))
+
+        table_holder = ttk.Frame(processed_frame, style="Storm.TFrame")
+        table_holder.pack(fill="both", expand=True)
+
+        processed_table_state = create_canvas_table(
+            table_holder,
+            processed_selected_value_var,
+            lambda: processed_selected_entry
+        )
+
+        selected_frame = ttk.Frame(processed_frame, style="Storm.TFrame")
+        selected_frame.pack(fill="x", pady=(10, 0))
+
+        ttk.Label(
+            selected_frame,
+            text="Selected Cell",
+            style="StormTop.TLabel"
+        ).pack(anchor="w", pady=(0, 4))
+
+        processed_selected_entry = tk.Entry(selected_frame, textvariable=processed_selected_value_var)
+        processed_selected_entry.pack(fill="x")
+
+    def build_raw_preview_dataframe():
         import pandas as pd
 
         input_path = input_var.get().strip()
         if not input_path:
             return None
 
-        df = pd.read_csv(input_path)
+        return pd.read_csv(input_path).head(50)
 
-        # Normalize Columns
+    def build_enabled_nodes():
+        nodes = []
+
         if normalize_var.get():
-            df.columns = [
-                str(col).strip().lower().replace(" ", "_")
-                for col in df.columns
-            ]
+            nodes.append((
+                "Normalize Columns",
+                NormalizeColumnsNode(),
+            ))
 
-        # Replace Values
         if replace_var.get():
             replace_map = build_replace_map()
-            if replace_map:
-                df = df.replace(replace_map)
+            if not replace_map:
+                raise ValueError("Replace Values is enabled, but no replace pairs were provided.")
+            nodes.append((
+                "Replace Values",
+                ReplaceValuesNode(replace_map),
+            ))
 
-        # Drop Duplicates
         if dropdup_var.get():
-            df = df.drop_duplicates()
+            nodes.append((
+                "Drop Duplicates",
+                DropDuplicatesNode(),
+            ))
 
-        # Column Filter
         if filter_var.get():
             filter_cols = build_filter_columns()
-            if filter_cols:
-                mode = filter_mode_var.get().strip().lower()
-                if mode not in ("include", "exclude"):
-                    mode = "include"
+            if not filter_cols:
+                raise ValueError("Column Filter is enabled, but no columns were provided.")
 
-                if mode == "include":
-                    missing = [col for col in filter_cols if col not in df.columns]
-                    if missing:
-                        raise ValueError(
-                            "Column Filter preview failed. Missing columns: "
-                            + ", ".join(missing)
-                        )
-                    df = df[filter_cols]
-                else:
-                    df = df.drop(columns=[col for col in filter_cols if col in df.columns])
+            mode = filter_mode_var.get().strip().lower()
+            if mode not in ("include", "exclude"):
+                mode = "include"
 
-        # Validate Required Columns
+            nodes.append((
+                "Column Filter",
+                ColumnFilterNode(filter_cols, Mode=mode),
+            ))
+
         if validate_var.get():
             validate_cols = build_validate_columns()
-            if validate_cols:
-                missing = [col for col in validate_cols if col not in df.columns]
-                if missing:
-                    raise ValueError(
-                        "Validate Required Columns preview failed. Missing columns: "
-                        + ", ".join(missing)
-                    )
+            if not validate_cols:
+                raise ValueError("Validate Required Columns is enabled, but no required columns were provided.")
 
-        return df.head(50)
+            nodes.append((
+                "Validate Required Columns",
+                ValidateRequiredColumnsNode(validate_cols),
+            ))
 
-    def show_dataframe_in_preview(df):
-        if preview_tree is None:
-            return
+        return nodes
 
-        preview_tree.delete(*preview_tree.get_children())
+    def build_step_diff(previous_df, current_df):
+        prev = previous_df.reset_index(drop=True).copy()
+        curr = current_df.reset_index(drop=True).copy()
 
-        columns = list(df.columns)
-        preview_tree["columns"] = columns
-        preview_tree["show"] = "headings"
+        prev_columns = list(prev.columns)
+        curr_columns = list(curr.columns)
 
-        for col in columns:
-            preview_tree.heading(col, text=str(col))
-            preview_tree.column(col, width=120, anchor="w")
+        added_columns = [col for col in curr_columns if col not in prev_columns]
+        deleted_columns = [col for col in prev_columns if col not in curr_columns]
 
-        for _, row in df.iterrows():
-            preview_tree.insert("", "end", values=[str(v) for v in row.tolist()])
+        common_columns = [col for col in curr_columns if col in prev_columns]
 
-        preview_info_var.set(f"Previewing {len(df)} rows | {len(columns)} columns")
+        common_row_count = min(len(prev), len(curr))
+        added_rows = set(range(common_row_count, len(curr)))
+        deleted_row_count = max(0, len(prev) - len(curr))
+
+        modified_cells = set()
+
+        for row_index in range(common_row_count):
+            for column_name in common_columns:
+                prev_value = prev.iloc[row_index][column_name]
+                curr_value = curr.iloc[row_index][column_name]
+
+                if str(prev_value) != str(curr_value):
+                    modified_cells.add((row_index, column_name))
+
+        return {
+            "added_columns": added_columns,
+            "deleted_columns": deleted_columns,
+            "added_rows": added_rows,
+            "deleted_row_count": deleted_row_count,
+            "modified_cells": modified_cells,
+        }
+
+    def build_step_cell_colors(current_df, diff, max_rows=100):
+        colors = {}
+        display_df = current_df.reset_index(drop=True).head(max_rows).copy()
+
+        if diff is None:
+            return colors
+
+        for row_index in range(len(display_df)):
+            for column_name in display_df.columns:
+                if row_index in diff["added_rows"]:
+                    colors[(row_index, column_name)] = "added"
+                elif column_name in diff["added_columns"]:
+                    colors[(row_index, column_name)] = "added"
+                elif (row_index, column_name) in diff["modified_cells"]:
+                    colors[(row_index, column_name)] = "modified"
+
+        return colors
+
+    def build_step_diagnostics(step_name, previous_df, current_df, duration_seconds):
+        return (
+            f"Node: {step_name} | "
+            f"Time: {duration_seconds:.3f}s | "
+            f"Rows: {len(previous_df)} -> {len(current_df)} | "
+            f"Columns: {len(previous_df.columns)} -> {len(current_df.columns)}"
+        )
 
     def refresh_preview():
         try:
             ensure_preview_window()
-            df = build_preview_dataframe()
+            df = build_raw_preview_dataframe()
             if df is None:
                 preview_info_var.set("No preview loaded.")
+                preview_selected_value_var.set("")
                 return
-            show_dataframe_in_preview(df)
+
+            preview_window.title(get_input_filename())
+            preview_info_var.set(f"Previewing {len(df)} rows | {len(df.columns)} columns")
+            render_canvas_table(preview_table_state, df)
         except Exception as e:
             messagebox.showerror("Preview Error", str(e))
 
-    def on_filter_mode_changed(event=None):
-        if input_var.get().strip():
-            refresh_preview()
+    def render_processed_step():
+        if not processed_steps:
+            return
 
-    # REPLACE ROWS
+        ensure_processed_window()
+
+        step = processed_steps[processed_step_index]
+        processed_window.title(get_processed_output_filename())
+        processed_title_var.set(f"{step['name']} ({processed_step_index + 1}/{len(processed_steps)})")
+        processed_diag_var.set(step["diagnostics"])
+
+        render_canvas_table(
+            processed_table_state,
+            step["display_df"],
+            cell_colors=step["cell_colors"]
+        )
+
+    def stop_processed_playback():
+        nonlocal processed_play_job, processed_is_playing
+
+        processed_is_playing = False
+        if processed_play_job is not None and processed_window is not None and processed_window.winfo_exists():
+            processed_window.after_cancel(processed_play_job)
+        processed_play_job = None
+
+    def play_processed_step():
+        nonlocal processed_play_job, processed_is_playing, processed_step_index
+
+        if not processed_is_playing or not processed_steps:
+            return
+
+        render_processed_step()
+
+        if processed_step_index >= len(processed_steps) - 1:
+            processed_is_playing = False
+            processed_play_job = None
+            return
+
+        total_duration_ms = 1000
+        step_delay = max(100, int(total_duration_ms / max(1, len(processed_steps) - 1)))
+
+        processed_step_index += 1
+        processed_play_job = processed_window.after(step_delay, play_processed_step)
+
+    def toggle_processed_playback():
+        nonlocal processed_is_playing, processed_step_index
+
+        if not processed_steps:
+            return
+
+        stop_processed_playback()
+        processed_step_index = 0
+        processed_is_playing = True
+        play_processed_step()
+
+    def show_previous_processed_step():
+        nonlocal processed_step_index
+
+        if not processed_steps:
+            return
+
+        stop_processed_playback()
+
+        if processed_step_index > 0:
+            processed_step_index -= 1
+            render_processed_step()
+
+    def show_next_processed_step():
+        nonlocal processed_step_index
+
+        if not processed_steps:
+            return
+
+        stop_processed_playback()
+
+        if processed_step_index < len(processed_steps) - 1:
+            processed_step_index += 1
+            render_processed_step()
+
+    def on_filter_mode_changed(event=None):
+        return
+
     def refresh_replace_rows():
         for child in replace_rows_frame.winfo_children():
             child.destroy()
@@ -251,19 +630,12 @@ def LaunchVisualizer():
             row_frame.grid_columnconfigure(0, weight=1)
             row_frame.grid_columnconfigure(1, weight=1)
 
-            from_entry = ttk.Entry(
-                row_frame,
-                textvariable=row_data["from_var"]
+            ttk.Entry(row_frame, textvariable=row_data["from_var"]).grid(
+                row=0, column=0, sticky="ew", padx=(0, 6)
             )
-            from_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-            from_entry.bind("<FocusOut>", lambda event: refresh_preview() if input_var.get().strip() else None)
-
-            to_entry = ttk.Entry(
-                row_frame,
-                textvariable=row_data["to_var"]
+            ttk.Entry(row_frame, textvariable=row_data["to_var"]).grid(
+                row=0, column=1, sticky="ew", padx=(0, 6)
             )
-            to_entry.grid(row=0, column=1, sticky="ew", padx=(0, 6))
-            to_entry.bind("<FocusOut>", lambda event: refresh_preview() if input_var.get().strip() else None)
 
             ttk.Button(
                 row_frame,
@@ -281,9 +653,6 @@ def LaunchVisualizer():
         replace_rows.append(row_data)
         refresh_replace_rows()
 
-        if input_var.get().strip():
-            refresh_preview()
-
     def delete_replace_row(index):
         if 0 <= index < len(replace_rows):
             del replace_rows[index]
@@ -292,9 +661,6 @@ def LaunchVisualizer():
             add_replace_row()
         else:
             refresh_replace_rows()
-
-        if input_var.get().strip():
-            refresh_preview()
 
     def build_replace_map():
         replace_map = {}
@@ -315,7 +681,6 @@ def LaunchVisualizer():
 
         return replace_map
 
-    # COLUMN FILTER ROWS
     def refresh_filter_rows():
         for child in filter_rows_frame.winfo_children():
             child.destroy()
@@ -325,12 +690,9 @@ def LaunchVisualizer():
             row_frame.grid(row=row_index, column=0, sticky="ew", pady=2)
             row_frame.grid_columnconfigure(0, weight=1)
 
-            value_entry = ttk.Entry(
-                row_frame,
-                textvariable=row_data["value_var"]
+            ttk.Entry(row_frame, textvariable=row_data["value_var"]).grid(
+                row=0, column=0, sticky="ew", padx=(0, 6)
             )
-            value_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-            value_entry.bind("<FocusOut>", lambda event: refresh_preview() if input_var.get().strip() else None)
 
             ttk.Button(
                 row_frame,
@@ -347,9 +709,6 @@ def LaunchVisualizer():
         filter_rows.append(row_data)
         refresh_filter_rows()
 
-        if input_var.get().strip():
-            refresh_preview()
-
     def delete_filter_row(index):
         if 0 <= index < len(filter_rows):
             del filter_rows[index]
@@ -359,9 +718,6 @@ def LaunchVisualizer():
         else:
             refresh_filter_rows()
 
-        if input_var.get().strip():
-            refresh_preview()
-
     def build_filter_columns():
         cols = []
         for row_data in filter_rows:
@@ -370,7 +726,6 @@ def LaunchVisualizer():
                 cols.append(value)
         return cols
 
-    # VALIDATE REQUIRED COLUMNS ROWS
     def refresh_validate_rows():
         for child in validate_rows_frame.winfo_children():
             child.destroy()
@@ -380,12 +735,9 @@ def LaunchVisualizer():
             row_frame.grid(row=row_index, column=0, sticky="ew", pady=2)
             row_frame.grid_columnconfigure(0, weight=1)
 
-            value_entry = ttk.Entry(
-                row_frame,
-                textvariable=row_data["value_var"]
+            ttk.Entry(row_frame, textvariable=row_data["value_var"]).grid(
+                row=0, column=0, sticky="ew", padx=(0, 6)
             )
-            value_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-            value_entry.bind("<FocusOut>", lambda event: refresh_preview() if input_var.get().strip() else None)
 
             ttk.Button(
                 row_frame,
@@ -402,9 +754,6 @@ def LaunchVisualizer():
         validate_rows.append(row_data)
         refresh_validate_rows()
 
-        if input_var.get().strip():
-            refresh_preview()
-
     def delete_validate_row(index):
         if 0 <= index < len(validate_rows):
             del validate_rows[index]
@@ -414,9 +763,6 @@ def LaunchVisualizer():
         else:
             refresh_validate_rows()
 
-        if input_var.get().strip():
-            refresh_preview()
-
     def build_validate_columns():
         cols = []
         for row_data in validate_rows:
@@ -425,86 +771,71 @@ def LaunchVisualizer():
                 cols.append(value)
         return cols
 
-    # RUN
     def run_pipeline():
+        nonlocal processed_steps, processed_step_index
+
         try:
+            import pandas as pd
+
             input_path = input_var.get().strip()
 
             if not input_path:
                 messagebox.showerror("Missing Input", "Please choose an input CSV file.")
                 return
 
-            output_path = filedialog.asksaveasfilename(
-                title="Save Output CSV As",
-                defaultextension=".csv",
-                filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")]
-            )
+            output_path = get_processed_output_path()
             if not output_path:
+                messagebox.showerror("Missing Input", "Please choose an input CSV file.")
                 return
 
-            P = Pipeline("UIRun")
-            P.Add(ExtractCsvNode(input_path))
+            Data = pd.read_csv(input_path)
 
-            if normalize_var.get():
-                P.Add(NormalizeColumnsNode())
+            steps = []
+            raw_display = Data.reset_index(drop=True).head(100).copy()
+            steps.append({
+                "name": "Raw Input",
+                "data": Data.copy(),
+                "display_df": raw_display,
+                "cell_colors": {},
+                "diagnostics": f"Node: Raw Input | Time: 0.000s | Rows: {len(Data)} -> {len(Data)} | Columns: {len(Data.columns)} -> {len(Data.columns)}"
+            })
 
-            if replace_var.get():
-                replace_map = build_replace_map()
-                if not replace_map:
-                    messagebox.showerror(
-                        "Missing Replace Values Settings",
-                        "Replace Values is enabled, but no replace pairs were provided."
-                    )
-                    return
-                P.Add(ReplaceValuesNode(replace_map))
+            enabled_nodes = build_enabled_nodes()
 
-            if dropdup_var.get():
-                P.Add(DropDuplicatesNode())
+            for step_name, node in enabled_nodes:
+                previous_df = Data.copy()
 
-            if filter_var.get():
-                filter_cols = build_filter_columns()
-                if not filter_cols:
-                    messagebox.showerror(
-                        "Missing Column Filter Settings",
-                        "Column Filter is enabled, but no columns were provided."
-                    )
-                    return
+                started_at = time.perf_counter()
+                Data = node.Run(Data)
+                duration_seconds = time.perf_counter() - started_at
 
-                mode = filter_mode_var.get().strip().lower()
-                if mode not in ("include", "exclude"):
-                    mode = "include"
+                current_df = Data.copy()
+                diff = build_step_diff(previous_df, current_df)
+                cell_colors = build_step_cell_colors(current_df, diff, max_rows=100)
+                diagnostics = build_step_diagnostics(step_name, previous_df, current_df, duration_seconds)
 
-                P.Add(ColumnFilterNode(filter_cols, Mode=mode))
+                steps.append({
+                    "name": step_name,
+                    "data": current_df,
+                    "display_df": current_df.reset_index(drop=True).head(100).copy(),
+                    "cell_colors": cell_colors,
+                    "diagnostics": diagnostics,
+                })
 
-            if validate_var.get():
-                validate_cols = build_validate_columns()
-                if not validate_cols:
-                    messagebox.showerror(
-                        "Missing Validation Settings",
-                        "Validate Required Columns is enabled, but no required columns were provided."
-                    )
-                    return
+            Data.to_csv(output_path, index=False)
 
-                P.Add(ValidateRequiredColumnsNode(validate_cols))
-
-            P.Add(WriteCsvNode(output_path))
-
-            root.update_idletasks()
-            P.Run()
-
-            messagebox.showinfo(
-                "Pipeline Complete",
-                f"Pipeline finished successfully.\n\nSaved output to:\n{output_path}"
-            )
+            processed_steps = steps
+            processed_step_index = 0
+            stop_processed_playback()
+            render_processed_step()
+            toggle_processed_playback()
 
         except Exception as e:
             messagebox.showerror("Pipeline Error", str(e))
 
-    # ROOT LAYOUT
     root.grid_rowconfigure(1, weight=1)
     root.grid_columnconfigure(0, weight=1)
 
-    # TOP BAR
     top = ttk.Frame(root, padding=10, style="Storm.TFrame")
     top.grid(row=0, column=0, sticky="ew")
     top.grid_columnconfigure(1, weight=1)
@@ -512,9 +843,7 @@ def LaunchVisualizer():
     ttk.Label(top, text="Input CSV", style="StormTop.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
     ttk.Entry(top, textvariable=input_var).grid(row=0, column=1, sticky="ew", padx=(0, 8))
     ttk.Button(top, text="Browse...", command=choose_input).grid(row=0, column=2, sticky="ew")
-    ttk.Button(top, text="Refresh Preview", command=refresh_preview).grid(row=0, column=3, sticky="ew", padx=(8, 0))
 
-    # MAIN CONTENT
     main = ttk.Frame(root, padding=(10, 0, 10, 10), style="Storm.TFrame")
     main.grid(row=1, column=0, sticky="nsew")
     main.grid_rowconfigure(0, weight=1)
@@ -526,19 +855,30 @@ def LaunchVisualizer():
 
     node_row = 0
 
-    # NORMALIZE COLUMNS
     normalize_box = ttk.Frame(nodes_box, style="StormPanel.TFrame")
     normalize_box.grid(row=node_row, column=0, sticky="ew", pady=(0, 6))
+    normalize_box.grid_columnconfigure(0, weight=1)
+
     ttk.Checkbutton(
         normalize_box,
         text="Normalize Columns",
         variable=normalize_var,
         style="Storm.TCheckbutton",
-        command=lambda: refresh_preview() if input_var.get().strip() else None
+        command=lambda: toggle_section(normalize_var, normalize_info)
     ).grid(row=0, column=0, sticky="w")
+
+    normalize_info = ttk.Frame(normalize_box, padding=(24, 6, 0, 0), style="StormPanel.TFrame")
+    normalize_info.grid(row=1, column=0, sticky="ew")
+    ttk.Label(
+        normalize_info,
+        text="Standardizes column names by trimming spaces, converting to lowercase, and replacing spaces with underscores.",
+        style="Storm.TLabel",
+        wraplength=360,
+        justify="left"
+    ).grid(row=0, column=0, sticky="w")
+
     node_row += 1
 
-    # REPLACE VALUES
     replace_box = ttk.Frame(nodes_box, style="StormPanel.TFrame")
     replace_box.grid(row=node_row, column=0, sticky="ew", pady=(0, 6))
     replace_box.grid_columnconfigure(0, weight=1)
@@ -555,12 +895,20 @@ def LaunchVisualizer():
     replace_settings.grid(row=1, column=0, sticky="ew")
     replace_settings.grid_columnconfigure(0, weight=1)
 
+    ttk.Label(
+        replace_settings,
+        text="Replaces matching values in the table using the find/replace pairs you add below.",
+        style="Storm.TLabel",
+        wraplength=360,
+        justify="left"
+    ).grid(row=0, column=0, sticky="w", pady=(0, 6))
+
     ttk.Label(replace_settings, text="Value To Find          Replace With", style="Storm.TLabel").grid(
-        row=0, column=0, sticky="w", pady=(0, 4)
+        row=1, column=0, sticky="w", pady=(0, 4)
     )
 
     replace_rows_frame = ttk.Frame(replace_settings, style="StormPanel.TFrame")
-    replace_rows_frame.grid(row=1, column=0, sticky="ew")
+    replace_rows_frame.grid(row=2, column=0, sticky="ew")
     replace_rows_frame.grid_columnconfigure(0, weight=1)
 
     ttk.Button(
@@ -568,29 +916,40 @@ def LaunchVisualizer():
         text="+ Add Row",
         style="Small.TButton",
         command=add_replace_row
-    ).grid(row=2, column=0, sticky="w", pady=(6, 0))
+    ).grid(row=3, column=0, sticky="w", pady=(6, 0))
 
     ttk.Label(
         replace_settings,
         text="Example: N/A        None",
         style="Storm.TLabel"
-    ).grid(row=3, column=0, sticky="w", pady=(4, 0))
+    ).grid(row=4, column=0, sticky="w", pady=(4, 0))
 
     node_row += 1
 
-    # DROP DUPLICATES
     dropdup_box = ttk.Frame(nodes_box, style="StormPanel.TFrame")
     dropdup_box.grid(row=node_row, column=0, sticky="ew", pady=(0, 6))
+    dropdup_box.grid_columnconfigure(0, weight=1)
+
     ttk.Checkbutton(
         dropdup_box,
         text="Drop Duplicates",
         variable=dropdup_var,
         style="Storm.TCheckbutton",
-        command=lambda: refresh_preview() if input_var.get().strip() else None
+        command=lambda: toggle_section(dropdup_var, dropdup_info)
     ).grid(row=0, column=0, sticky="w")
+
+    dropdup_info = ttk.Frame(dropdup_box, padding=(24, 6, 0, 0), style="StormPanel.TFrame")
+    dropdup_info.grid(row=1, column=0, sticky="ew")
+    ttk.Label(
+        dropdup_info,
+        text="Removes duplicate rows from the table.",
+        style="Storm.TLabel",
+        wraplength=360,
+        justify="left"
+    ).grid(row=0, column=0, sticky="w")
+
     node_row += 1
 
-    # COLUMN FILTER
     filter_box = ttk.Frame(nodes_box, style="StormPanel.TFrame")
     filter_box.grid(row=node_row, column=0, sticky="ew", pady=(0, 6))
     filter_box.grid_columnconfigure(0, weight=1)
@@ -607,7 +966,15 @@ def LaunchVisualizer():
     filter_settings.grid(row=1, column=0, sticky="ew")
     filter_settings.grid_columnconfigure(0, weight=1)
 
-    ttk.Label(filter_settings, text="Mode", style="Storm.TLabel").grid(row=0, column=0, sticky="w")
+    ttk.Label(
+        filter_settings,
+        text="Keeps only selected columns in include mode, or removes selected columns in exclude mode.",
+        style="Storm.TLabel",
+        wraplength=360,
+        justify="left"
+    ).grid(row=0, column=0, sticky="w", pady=(0, 6))
+
+    ttk.Label(filter_settings, text="Mode", style="Storm.TLabel").grid(row=1, column=0, sticky="w")
 
     filter_mode_combo = ttk.Combobox(
         filter_settings,
@@ -616,13 +983,13 @@ def LaunchVisualizer():
         state="readonly",
         width=14
     )
-    filter_mode_combo.grid(row=1, column=0, sticky="w", pady=(2, 6))
+    filter_mode_combo.grid(row=2, column=0, sticky="w", pady=(2, 6))
     filter_mode_combo.bind("<<ComboboxSelected>>", on_filter_mode_changed)
 
-    ttk.Label(filter_settings, text="Columns", style="Storm.TLabel").grid(row=2, column=0, sticky="w")
+    ttk.Label(filter_settings, text="Columns", style="Storm.TLabel").grid(row=3, column=0, sticky="w")
 
     filter_rows_frame = ttk.Frame(filter_settings, style="StormPanel.TFrame")
-    filter_rows_frame.grid(row=3, column=0, sticky="ew")
+    filter_rows_frame.grid(row=4, column=0, sticky="ew")
     filter_rows_frame.grid_columnconfigure(0, weight=1)
 
     ttk.Button(
@@ -630,17 +997,16 @@ def LaunchVisualizer():
         text="+ Add Row",
         style="Small.TButton",
         command=add_filter_row
-    ).grid(row=4, column=0, sticky="w", pady=(6, 0))
+    ).grid(row=5, column=0, sticky="w", pady=(6, 0))
 
     ttk.Label(
         filter_settings,
         text="Example: customer_name",
         style="Storm.TLabel"
-    ).grid(row=5, column=0, sticky="w", pady=(4, 0))
+    ).grid(row=6, column=0, sticky="w", pady=(4, 0))
 
     node_row += 1
 
-    # VALIDATE REQUIRED COLUMNS
     validate_box = ttk.Frame(nodes_box, style="StormPanel.TFrame")
     validate_box.grid(row=node_row, column=0, sticky="ew", pady=(0, 6))
     validate_box.grid_columnconfigure(0, weight=1)
@@ -657,10 +1023,18 @@ def LaunchVisualizer():
     validate_settings.grid(row=1, column=0, sticky="ew")
     validate_settings.grid_columnconfigure(0, weight=1)
 
-    ttk.Label(validate_settings, text="Required Columns", style="Storm.TLabel").grid(row=0, column=0, sticky="w")
+    ttk.Label(
+        validate_settings,
+        text="Checks that the listed columns exist after the selected transformations are applied.",
+        style="Storm.TLabel",
+        wraplength=360,
+        justify="left"
+    ).grid(row=0, column=0, sticky="w", pady=(0, 6))
+
+    ttk.Label(validate_settings, text="Required Columns", style="Storm.TLabel").grid(row=1, column=0, sticky="w")
 
     validate_rows_frame = ttk.Frame(validate_settings, style="StormPanel.TFrame")
-    validate_rows_frame.grid(row=1, column=0, sticky="ew")
+    validate_rows_frame.grid(row=2, column=0, sticky="ew")
     validate_rows_frame.grid_columnconfigure(0, weight=1)
 
     ttk.Button(
@@ -668,18 +1042,19 @@ def LaunchVisualizer():
         text="+ Add Row",
         style="Small.TButton",
         command=add_validate_row
-    ).grid(row=2, column=0, sticky="w", pady=(6, 0))
+    ).grid(row=3, column=0, sticky="w", pady=(6, 0))
 
     ttk.Label(
         validate_settings,
         text="Example: email_address",
         style="Storm.TLabel"
-    ).grid(row=3, column=0, sticky="w", pady=(4, 0))
+    ).grid(row=4, column=0, sticky="w", pady=(4, 0))
 
     node_row += 1
 
-    # INITIAL VISIBILITY
+    show_section(normalize_info, normalize_var.get())
     show_section(replace_settings, replace_var.get())
+    show_section(dropdup_info, dropdup_var.get())
     show_section(filter_settings, filter_var.get())
     show_section(validate_settings, validate_var.get())
 
@@ -687,7 +1062,6 @@ def LaunchVisualizer():
     add_filter_row()
     add_validate_row()
 
-    # BOTTOM CONTROLS
     bottom = ttk.Frame(root, padding=(10, 0, 10, 14), style="Storm.TFrame")
     bottom.grid(row=2, column=0, sticky="ew")
     bottom.grid_columnconfigure(0, weight=1)
