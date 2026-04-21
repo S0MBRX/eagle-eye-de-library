@@ -11,6 +11,7 @@ def LaunchVisualizer():
         DropDuplicatesNode,
         FilterNode,
         GenerateColumnNode,
+        TypeConsistencyNode,
         ValidateRequiredColumnsNode,
     )
 
@@ -166,6 +167,7 @@ def LaunchVisualizer():
     validate_var = tk.BooleanVar(value=False)
 
     normalize_target_var = tk.StringVar(value="column headers")
+    type_outlier_action_var = tk.StringVar(value="highlight")
     filter_target_var = tk.StringVar(value="rows")
     filter_mode_var = tk.StringVar(value="include")
     filter_match_mode_var = tk.StringVar(value="or")
@@ -185,11 +187,13 @@ def LaunchVisualizer():
     tunable_nodes = {
         "Normalize",
         "Replace Values",
+        "Fix Data Types",
         "Filter",
         "Generate Column",
         "Validate Required Columns",
     }
     tunable_add_buttons = {}
+    tunable_reset_buttons = {}
     tunable_pulse_jobs = {}
     tunable_pulse_index = {}
     initializing_tunables = False
@@ -296,6 +300,8 @@ def LaunchVisualizer():
             return normalize_target_label(meta.get("normalize_target", "headers"))
         if name == "Replace Values":
             return f"{len(meta.get('replace_map', {}))} pairs"
+        if name == "Fix Data Types":
+            return f"{meta.get('outlier_action', 'highlight')} outliers"
         if name == "Filter":
             values = meta.get("filter_values", [])
             return f"{meta.get('filter_mode', 'include')} {meta.get('filter_target', 'rows')} with {len(values)} values"
@@ -314,6 +320,8 @@ def LaunchVisualizer():
             return [f"target: {normalize_target_label(meta.get('normalize_target', 'headers'))}"]
         if name == "Replace Values":
             return [f"{old} -> {new}" for old, new in meta.get("replace_map", {}).items()]
+        if name == "Fix Data Types":
+            return [f"outliers: {meta.get('outlier_action', 'highlight')}"]
         if name == "Filter":
             values = meta.get("filter_values", [])
             return [
@@ -337,6 +345,7 @@ def LaunchVisualizer():
             "Normalize",
             "Normalize Columns",
             "Replace Values",
+            "Fix Data Types",
             "Filter",
             "Generate Column",
             "Validate Required Columns",
@@ -406,6 +415,8 @@ def LaunchVisualizer():
 
         if name == "Replace Values":
             return flash_row_widgets(replace_rows, "from_entry", "to_entry")
+        if name == "Fix Data Types":
+            return False
         if name == "Filter":
             return flash_row_widgets(filter_rows, "entry")
         if name == "Generate Column":
@@ -470,6 +481,25 @@ def LaunchVisualizer():
                 save_order_item_meta(row_index, {"replace_map": replace_map})
 
             return save_replace_values
+
+        if name == "Fix Data Types":
+            action_var = tk.StringVar(value=meta.get("outlier_action", "highlight"))
+            ttk.Label(editor, text="outliers", style="Storm.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=1)
+            ttk.Combobox(
+                editor,
+                textvariable=action_var,
+                values=("highlight", "delete"),
+                state="readonly",
+                width=10
+            ).grid(row=0, column=1, sticky="w", pady=1)
+
+            def save_type_consistency():
+                action = action_var.get().strip().lower()
+                if action not in ("highlight", "delete"):
+                    action = "highlight"
+                save_order_item_meta(row_index, {"outlier_action": action})
+
+            return save_type_consistency
 
         if name == "Filter":
             target_var = tk.StringVar(value=meta.get("filter_target", "rows"))
@@ -729,6 +759,7 @@ def LaunchVisualizer():
             "Normalize": (lambda: normalize_info, lambda: normalize_toggle),
             "Normalize Columns": (lambda: normalize_info, lambda: normalize_toggle),
             "Replace Values": (lambda: replace_settings, lambda: replace_toggle),
+            "Fix Data Types": (lambda: type_settings, lambda: type_toggle),
             "Drop Duplicates": (lambda: dropdup_info, lambda: dropdup_toggle),
             "Filter": (lambda: filter_settings, lambda: filter_toggle),
             "Generate Column": (lambda: generate_settings, lambda: generate_toggle),
@@ -754,6 +785,8 @@ def LaunchVisualizer():
             return normalize_target_key(normalize_target_var.get()) == "headers"
         if name == "Replace Values":
             return len(replace_rows) == 1 and replace_rows[0]["from_var"].get().strip() == "" and replace_rows[0]["to_var"].get().strip() == ""
+        if name == "Fix Data Types":
+            return type_outlier_action_var.get() == "highlight"
         if name == "Filter":
             return (
                 filter_target_var.get() == "rows"
@@ -803,8 +836,12 @@ def LaunchVisualizer():
         if tuneables_are_default(name):
             if name in tunable_add_buttons:
                 tunable_add_buttons[name].configure(style="Add.TButton")
+            if name in tunable_reset_buttons:
+                tunable_reset_buttons[name].grid_remove()
             return
 
+        if name in tunable_reset_buttons:
+            tunable_reset_buttons[name].grid()
         tunable_pulse_index[name] = 0
         pulse_tunable_add_button(name)
 
@@ -818,6 +855,8 @@ def LaunchVisualizer():
             elif name == "Replace Values":
                 replace_rows.clear()
                 add_replace_row()
+            elif name == "Fix Data Types":
+                type_outlier_action_var.set("highlight")
             elif name == "Filter":
                 filter_target_var.set("rows")
                 filter_mode_var.set("include")
@@ -843,6 +882,7 @@ def LaunchVisualizer():
         refresh_tunable_add_state(name)
 
     normalize_target_var.trace_add("write", lambda *args: mark_tuneables_changed("Normalize"))
+    type_outlier_action_var.trace_add("write", lambda *args: mark_tuneables_changed("Fix Data Types"))
     filter_target_var.trace_add("write", lambda *args: mark_tuneables_changed("Filter"))
     filter_mode_var.trace_add("write", lambda *args: mark_tuneables_changed("Filter"))
     filter_match_mode_var.trace_add("write", lambda *args: mark_tuneables_changed("Filter"))
@@ -1166,6 +1206,8 @@ def LaunchVisualizer():
                             bg = modified_bg
                         elif cell_colors[color_key] == "deleted":
                             bg = deleted_bg
+                        elif cell_colors[color_key] == "outlier":
+                            bg = "#e3d4ff"
 
                 line_count = estimate_text_height(cell_value)
                 cell = tk.Text(
@@ -1305,6 +1347,7 @@ def LaunchVisualizer():
         add_legend_item("#d9f5d9", "added")
         add_legend_item("#ffe7c2", "modified")
         add_legend_item("#ffd6d6", "deleted")
+        add_legend_item("#e3d4ff", "outlier")
 
         controls_frame = ttk.Frame(processed_frame, style="Storm.TFrame")
         controls_frame.pack(fill="x", pady=(0, 8))
@@ -1374,6 +1417,17 @@ def LaunchVisualizer():
                 "name": name,
                 "meta": {
                     "replace_map": dict(replace_map),
+                },
+            }
+
+        if name == "Fix Data Types":
+            action = type_outlier_action_var.get().strip().lower()
+            if action not in ("highlight", "delete"):
+                action = "highlight"
+            return {
+                "name": name,
+                "meta": {
+                    "outlier_action": action,
                 },
             }
 
@@ -1449,6 +1503,8 @@ def LaunchVisualizer():
             node = NormalizeColumnsNode(Target=meta.get("normalize_target", "headers"))
         elif name == "Replace Values":
             node = ReplaceValuesNode(meta["replace_map"])
+        elif name == "Fix Data Types":
+            node = TypeConsistencyNode(OutlierAction=meta.get("outlier_action", "highlight"))
         elif name == "Drop Duplicates":
             node = DropDuplicatesNode()
         elif name == "Filter":
@@ -1501,6 +1557,8 @@ def LaunchVisualizer():
             "modified_old_values": {},
             "modified_header_columns": set(),
             "added_column_cells": set(),
+            "outlier_cells": set(),
+            "outlier_values": [],
         }
 
         if step_name in ("Normalize", "Normalize Columns"):
@@ -1569,6 +1627,36 @@ def LaunchVisualizer():
                         diff["modified_cells"].add(color_key)
                         diff["modified_old_values"][color_key] = "" if prev_value is None else str(prev_value)
 
+            return diff
+
+        if step_name == "Fix Data Types":
+            report = meta.get("type_report", {})
+            current_index_positions = {
+                row_label: row_position
+                for row_position, row_label in enumerate(current_df.index)
+            }
+            for item in report.get("corrected", []):
+                row_index = current_index_positions.get(item.get("row_label"), item.get("row"))
+                column_name = item.get("column")
+                if row_index is None or column_name not in curr_columns:
+                    continue
+                color_key = (row_index, column_name)
+                diff["modified_cells"].add(color_key)
+                diff["modified_old_values"][color_key] = item.get("old_value", "")
+
+            if meta.get("outlier_action", "highlight") == "delete":
+                diff["deleted_rows"] = set(report.get("deleted_rows", []))
+            else:
+                for item in report.get("outliers", []):
+                    row_index = item.get("row")
+                    column_name = item.get("column")
+                    if row_index is None or column_name not in curr_columns:
+                        continue
+                    color_key = (row_index, column_name)
+                    diff["outlier_cells"].add(color_key)
+                    diff["modified_old_values"][color_key] = item.get("value", "")
+
+            diff["outlier_values"] = list(report.get("outliers", []))
             return diff
 
         if step_name == "Drop Duplicates":
@@ -1667,6 +1755,8 @@ def LaunchVisualizer():
                     colors[(row_index, column_name)] = "added"
                 elif column_name in diff["added_column_cells"]:
                     colors[(row_index, column_name)] = "added"
+                elif (row_index, column_name) in diff["outlier_cells"]:
+                    colors[(row_index, column_name)] = "outlier"
                 elif (row_index, column_name) in diff["modified_cells"]:
                     colors[(row_index, column_name)] = "modified"
 
@@ -1708,6 +1798,27 @@ def LaunchVisualizer():
             f"Rows: {len(previous_df)} -> {len(current_df)}\n"
             f"Columns: {len(previous_df.columns)} -> {len(current_df.columns)}"
         )
+
+    def build_type_consistency_diagnostics(previous_df, current_df, duration_seconds, report):
+        lines = [
+            f"Time: {duration_seconds:.3f}s",
+            f"Rows: {len(previous_df)} -> {len(current_df)}",
+            f"Columns: {len(previous_df.columns)} -> {len(current_df.columns)}",
+            f"Corrected values: {len(report.get('corrected', []))}",
+            f"Outliers flagged: {len(report.get('outliers', []))}",
+        ]
+
+        outliers = report.get("outliers", [])
+        if outliers:
+            lines.append("Outliers:")
+            for item in outliers[:8]:
+                lines.append(
+                    f"- {item.get('column')} | {item.get('expected_type')} | {item.get('value')}"
+                )
+            if len(outliers) > 8:
+                lines.append(f"- ... {len(outliers) - 8} more")
+
+        return "\n".join(lines)
 
     def build_total_diagnostics(start_df, final_df, duration_seconds):
         return (
@@ -2090,6 +2201,9 @@ def LaunchVisualizer():
                 started_at = time.perf_counter()
                 Data = node.Run(Data)
                 duration_seconds = time.perf_counter() - started_at
+                if step_name == "Fix Data Types":
+                    meta = dict(meta)
+                    meta["type_report"] = getattr(node, "Report", {})
 
                 current_df = Data.copy()
                 diff = build_step_diff(step_name, previous_df, current_df, meta)
@@ -2100,7 +2214,15 @@ def LaunchVisualizer():
                     )
 
                 cell_colors = build_final_step_cell_colors(current_df, diff, max_rows=100)
-                diagnostics = build_step_diagnostics(step_name, previous_df, current_df, duration_seconds)
+                if step_name == "Fix Data Types":
+                    diagnostics = build_type_consistency_diagnostics(
+                        previous_df,
+                        current_df,
+                        duration_seconds,
+                        meta.get("type_report", {})
+                    )
+                else:
+                    diagnostics = build_step_diagnostics(step_name, previous_df, current_df, duration_seconds)
 
                 steps.append({
                     "name": step_name,
@@ -2265,8 +2387,8 @@ def LaunchVisualizer():
     normalize_header.grid_columnconfigure(1, weight=1)
     normalize_add_button = ttk.Button(
         normalize_header,
-        text="+",
-        width=4,
+        text="+add",
+        width=5,
         style="Add.TButton",
         command=lambda: add_order_item("Normalize")
     )
@@ -2275,6 +2397,16 @@ def LaunchVisualizer():
     normalize_toggle = ttk.Button(normalize_header, text=format_node_toggle_text("Normalize", False), style="NodeToggle.TButton")
     normalize_toggle.grid(row=0, column=1, sticky="ew")
     normalize_toggle.configure(command=lambda: toggle_settings(normalize_info, normalize_toggle, "Normalize"))
+    normalize_reset_button = ttk.Button(
+        normalize_header,
+        text="\u21b6",
+        width=3,
+        style="Small.TButton",
+        command=lambda: reset_tuneables("Normalize")
+    )
+    normalize_reset_button.grid(row=0, column=2, sticky="e", padx=(6, 0))
+    normalize_reset_button.grid_remove()
+    tunable_reset_buttons["Normalize"] = normalize_reset_button
 
     normalize_info = ttk.Frame(normalize_box, padding=(24, 6, 0, 0), style="StormPanel.TFrame")
     normalize_info.grid(row=1, column=0, sticky="ew")
@@ -2282,7 +2414,7 @@ def LaunchVisualizer():
     normalize_info.grid_columnconfigure(1, weight=1)
     ttk.Label(
         normalize_info,
-        text="Cleans text by trimming spaces, lowercasing it, and changing spaces to underscores.",
+        text="Cleans text by: Trimming (Whitespace), lowercasing, space to underscore.",
         style="Storm.TLabel",
         wraplength=360,
         justify="left"
@@ -2297,13 +2429,6 @@ def LaunchVisualizer():
         width=16
     ).grid(row=1, column=1, sticky="w")
 
-    ttk.Button(
-        normalize_info,
-        text="Reset",
-        style="Small.TButton",
-        command=lambda: reset_tuneables("Normalize")
-    ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
-
     node_row += 1
 
     replace_box = ttk.Frame(nodes_box, style="StormPanel.TFrame")
@@ -2315,8 +2440,8 @@ def LaunchVisualizer():
     replace_header.grid_columnconfigure(1, weight=1)
     replace_add_button = ttk.Button(
         replace_header,
-        text="+",
-        width=4,
+        text="+add",
+        width=5,
         style="Add.TButton",
         command=lambda: add_order_item("Replace Values"),
     )
@@ -2325,6 +2450,16 @@ def LaunchVisualizer():
     replace_toggle = ttk.Button(replace_header, text=format_node_toggle_text("Replace Values", False), style="NodeToggle.TButton")
     replace_toggle.grid(row=0, column=1, sticky="ew")
     replace_toggle.configure(command=lambda: toggle_settings(replace_settings, replace_toggle, "Replace Values"))
+    replace_reset_button = ttk.Button(
+        replace_header,
+        text="\u21b6",
+        width=3,
+        style="Small.TButton",
+        command=lambda: reset_tuneables("Replace Values")
+    )
+    replace_reset_button.grid(row=0, column=2, sticky="e", padx=(6, 0))
+    replace_reset_button.grid_remove()
+    tunable_reset_buttons["Replace Values"] = replace_reset_button
 
     replace_settings = ttk.Frame(replace_box, padding=(24, 6, 0, 0), style="StormPanel.TFrame")
     replace_settings.grid(row=1, column=0, sticky="ew")
@@ -2360,12 +2495,58 @@ def LaunchVisualizer():
         command=add_replace_row
     ).grid(row=3, column=0, sticky="w", pady=(6, 0))
 
-    ttk.Button(
-        replace_settings,
-        text="Reset",
+    node_row += 1
+
+    type_box = ttk.Frame(nodes_box, style="StormPanel.TFrame")
+    type_box.grid(row=node_row, column=0, sticky="ew", pady=(0, 6))
+    type_box.grid_columnconfigure(0, weight=1)
+
+    type_header = ttk.Frame(type_box, style="StormPanel.TFrame")
+    type_header.grid(row=0, column=0, sticky="ew")
+    type_header.grid_columnconfigure(1, weight=1)
+    type_add_button = ttk.Button(
+        type_header,
+        text="+add",
+        width=5,
+        style="Add.TButton",
+        command=lambda: add_order_item("Fix Data Types"),
+    )
+    type_add_button.grid(row=0, column=0, sticky="w", padx=(0, 6))
+    tunable_add_buttons["Fix Data Types"] = type_add_button
+    type_toggle = ttk.Button(type_header, text=format_node_toggle_text("Fix Data Types", False), style="NodeToggle.TButton")
+    type_toggle.grid(row=0, column=1, sticky="ew")
+    type_toggle.configure(command=lambda: toggle_settings(type_settings, type_toggle, "Fix Data Types"))
+    type_reset_button = ttk.Button(
+        type_header,
+        text="\u21b6",
+        width=3,
         style="Small.TButton",
-        command=lambda: reset_tuneables("Replace Values")
-    ).grid(row=4, column=0, sticky="w", pady=(6, 0))
+        command=lambda: reset_tuneables("Fix Data Types")
+    )
+    type_reset_button.grid(row=0, column=2, sticky="e", padx=(6, 0))
+    type_reset_button.grid_remove()
+    tunable_reset_buttons["Fix Data Types"] = type_reset_button
+
+    type_settings = ttk.Frame(type_box, padding=(24, 6, 0, 0), style="StormPanel.TFrame")
+    type_settings.grid(row=1, column=0, sticky="ew")
+    type_settings.grid_columnconfigure(0, weight=0)
+    type_settings.grid_columnconfigure(1, weight=1)
+    ttk.Label(
+        type_settings,
+        text="Finds the dominant type in each column, fixes values it can coerce, and flags values that do not fit.",
+        style="Storm.TLabel",
+        wraplength=360,
+        justify="left"
+    ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+    ttk.Label(type_settings, text="Outliers", style="Storm.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 8))
+    ttk.Combobox(
+        type_settings,
+        textvariable=type_outlier_action_var,
+        values=["highlight", "delete"],
+        state="readonly",
+        width=14
+    ).grid(row=1, column=1, sticky="w")
 
     node_row += 1
 
@@ -2378,8 +2559,8 @@ def LaunchVisualizer():
     dropdup_header.grid_columnconfigure(1, weight=1)
     ttk.Button(
         dropdup_header,
-        text="+",
-        width=4,
+        text="+add",
+        width=5,
         style="Add.TButton",
         command=lambda: add_order_item("Drop Duplicates")
     ).grid(row=0, column=0, sticky="w", padx=(0, 6))
@@ -2408,8 +2589,8 @@ def LaunchVisualizer():
     filter_header.grid_columnconfigure(1, weight=1)
     filter_add_button = ttk.Button(
         filter_header,
-        text="+",
-        width=4,
+        text="+add",
+        width=5,
         style="Add.TButton",
         command=lambda: add_order_item("Filter"),
     )
@@ -2418,6 +2599,16 @@ def LaunchVisualizer():
     filter_toggle = ttk.Button(filter_header, text=format_node_toggle_text("Filter", False), style="NodeToggle.TButton")
     filter_toggle.grid(row=0, column=1, sticky="ew")
     filter_toggle.configure(command=lambda: toggle_settings(filter_settings, filter_toggle, "Filter"))
+    filter_reset_button = ttk.Button(
+        filter_header,
+        text="\u21b6",
+        width=3,
+        style="Small.TButton",
+        command=lambda: reset_tuneables("Filter")
+    )
+    filter_reset_button.grid(row=0, column=2, sticky="e", padx=(6, 0))
+    filter_reset_button.grid_remove()
+    tunable_reset_buttons["Filter"] = filter_reset_button
 
     filter_settings = ttk.Frame(filter_box, padding=(24, 6, 0, 0), style="StormPanel.TFrame")
     filter_settings.grid(row=1, column=0, sticky="ew")
@@ -2480,12 +2671,6 @@ def LaunchVisualizer():
         style="Small.TButton",
         command=add_filter_row
     ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(6, 0))
-    ttk.Button(
-        filter_settings,
-        text="Reset",
-        style="Small.TButton",
-        command=lambda: reset_tuneables("Filter")
-    ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
     node_row += 1
 
@@ -2498,8 +2683,8 @@ def LaunchVisualizer():
     generate_header.grid_columnconfigure(1, weight=1)
     generate_add_button = ttk.Button(
         generate_header,
-        text="+",
-        width=4,
+        text="+add",
+        width=5,
         style="Add.TButton",
         command=lambda: add_order_item("Generate Column"),
     )
@@ -2508,6 +2693,16 @@ def LaunchVisualizer():
     generate_toggle = ttk.Button(generate_header, text=format_node_toggle_text("Generate Column", False), style="NodeToggle.TButton")
     generate_toggle.grid(row=0, column=1, sticky="ew")
     generate_toggle.configure(command=lambda: toggle_settings(generate_settings, generate_toggle, "Generate Column"))
+    generate_reset_button = ttk.Button(
+        generate_header,
+        text="\u21b6",
+        width=3,
+        style="Small.TButton",
+        command=lambda: reset_tuneables("Generate Column")
+    )
+    generate_reset_button.grid(row=0, column=2, sticky="e", padx=(6, 0))
+    generate_reset_button.grid_remove()
+    tunable_reset_buttons["Generate Column"] = generate_reset_button
 
     generate_settings = ttk.Frame(generate_box, padding=(24, 6, 0, 0), style="StormPanel.TFrame")
     generate_settings.grid(row=1, column=0, sticky="ew")
@@ -2554,12 +2749,6 @@ def LaunchVisualizer():
         style="Small.TButton",
         command=add_generate_row
     ).grid(row=8, column=0, sticky="w", pady=(6, 0))
-    ttk.Button(
-        generate_settings,
-        text="Reset",
-        style="Small.TButton",
-        command=lambda: reset_tuneables("Generate Column")
-    ).grid(row=9, column=0, sticky="w", pady=(6, 0))
 
     node_row += 1
 
@@ -2572,8 +2761,8 @@ def LaunchVisualizer():
     validate_header.grid_columnconfigure(1, weight=1)
     validate_add_button = ttk.Button(
         validate_header,
-        text="+",
-        width=4,
+        text="+add",
+        width=5,
         style="Add.TButton",
         command=lambda: add_order_item("Validate Required Columns"),
     )
@@ -2582,6 +2771,16 @@ def LaunchVisualizer():
     validate_toggle = ttk.Button(validate_header, text=format_node_toggle_text("Validate Required Columns", False), style="NodeToggle.TButton")
     validate_toggle.grid(row=0, column=1, sticky="ew")
     validate_toggle.configure(command=lambda: toggle_settings(validate_settings, validate_toggle, "Validate Required Columns"))
+    validate_reset_button = ttk.Button(
+        validate_header,
+        text="\u21b6",
+        width=3,
+        style="Small.TButton",
+        command=lambda: reset_tuneables("Validate Required Columns")
+    )
+    validate_reset_button.grid(row=0, column=2, sticky="e", padx=(6, 0))
+    validate_reset_button.grid_remove()
+    tunable_reset_buttons["Validate Required Columns"] = validate_reset_button
 
     validate_settings = ttk.Frame(validate_box, padding=(24, 6, 0, 0), style="StormPanel.TFrame")
     validate_settings.grid(row=1, column=0, sticky="ew")
@@ -2608,24 +2807,19 @@ def LaunchVisualizer():
         command=add_validate_row
     ).grid(row=3, column=0, sticky="w", pady=(6, 0))
 
-    ttk.Button(
-        validate_settings,
-        text="Reset",
-        style="Small.TButton",
-        command=lambda: reset_tuneables("Validate Required Columns")
-    ).grid(row=4, column=0, sticky="w", pady=(6, 0))
-
     node_row += 1
 
     normalize_box.grid_configure(row=0)
     replace_box.grid_configure(row=1)
-    filter_box.grid_configure(row=2)
-    generate_box.grid_configure(row=3)
-    dropdup_box.grid_configure(row=4)
+    type_box.grid_configure(row=2)
+    filter_box.grid_configure(row=3)
+    generate_box.grid_configure(row=4)
+    dropdup_box.grid_configure(row=5)
     validate_box.grid_remove()
 
     show_section(normalize_info, False)
     show_section(replace_settings, False)
+    show_section(type_settings, False)
     show_section(dropdup_info, False)
     show_section(filter_settings, False)
     show_section(generate_settings, False)

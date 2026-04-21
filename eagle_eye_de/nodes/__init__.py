@@ -7,6 +7,7 @@ from .transform import (
     ColumnFilterNode,
     RowFilterNode,
     GenerateColumnNode,
+    TypeConsistencyNode,
 )
 from .validate import ValidateRequiredColumnsNode
 from .load import WriteCsvNode
@@ -20,6 +21,7 @@ __all__ = [
     "ColumnFilterNode",
     "RowFilterNode",
     "GenerateColumnNode",
+    "TypeConsistencyNode",
     "ValidateRequiredColumnsNode",
     "WriteCsvNode",
 ]

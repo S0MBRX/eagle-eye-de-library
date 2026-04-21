@@ -5,6 +5,7 @@ from .filter import FilterNode
 from .column_filter import ColumnFilterNode
 from .row_filter import RowFilterNode
 from .generate_column import GenerateColumnNode
+from .type_consistency import TypeConsistencyNode
 
 __all__ = [
     "NormalizeColumnsNode",
@@ -14,4 +15,5 @@ __all__ = [
     "ColumnFilterNode",
     "RowFilterNode",
     "GenerateColumnNode",
+    "TypeConsistencyNode",
 ]
