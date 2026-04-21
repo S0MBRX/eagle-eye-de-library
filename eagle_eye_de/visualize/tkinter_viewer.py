@@ -9,15 +9,14 @@ def LaunchVisualizer():
         NormalizeColumnsNode,
         ReplaceValuesNode,
         DropDuplicatesNode,
-        ColumnFilterNode,
-        RowFilterNode,
+        FilterNode,
         GenerateColumnNode,
         ValidateRequiredColumnsNode,
     )
 
     root = tk.Tk()
     root.title("EagleEyeDE Visualizer")
-    root.geometry("540x620")
+    root.geometry("594x775")
     root.configure(bg="#5B6E8A")
 
     style = ttk.Style()
@@ -49,6 +48,8 @@ def LaunchVisualizer():
     style.configure("Storm.TLabelframe.Label", background=panel_blue, foreground="white")
     style.configure("Storm.TLabel", background=panel_blue, foreground="white")
     style.configure("StormTop.TLabel", background=storm_blue, foreground="white")
+    style.configure("ProcessedTitle.TLabel", background=storm_blue, foreground="white", font=("Arial", 30, "bold"))
+    style.configure("ProcessedFinalTitle.TLabel", background=storm_blue, foreground=green, font=("Arial", 30, "bold"))
     style.configure("Storm.TCheckbutton", background=panel_blue, foreground="white")
     style.map("Storm.TCheckbutton", background=[("active", panel_blue)])
 
@@ -69,14 +70,14 @@ def LaunchVisualizer():
         "RunDisabled.TButton",
         font=("Arial", 18, "bold"),
         padding=(20, 10),
-        background="#8B929C",
-        foreground="#E6E6E6",
+        background=red,
+        foreground="white",
         borderwidth=0,
     )
     style.map(
         "RunDisabled.TButton",
-        background=[("disabled", "#8B929C"), ("active", "#8B929C"), ("pressed", "#8B929C")],
-        foreground=[("disabled", "#E6E6E6"), ("active", "#E6E6E6"), ("pressed", "#E6E6E6")],
+        background=[("disabled", red), ("active", red), ("pressed", red)],
+        foreground=[("disabled", "white"), ("active", "white"), ("pressed", "white")],
     )
 
     style.configure("Small.TButton", padding=(6, 3))
@@ -114,14 +115,43 @@ def LaunchVisualizer():
     style.map("BrowsePulse.TButton", background=[("active", green_active), ("pressed", green_active)])
     style.configure("Flash.TEntry", fieldbackground="#FFB6B6")
     browse_pulse_styles = []
-    browse_pulse_positions = [0.0, 0.12, 0.26, 0.42, 0.6, 0.78, 1.0, 0.78, 0.6, 0.42, 0.26, 0.12]
+    add_pulse_styles = []
+    order_pulse_styles = []
+    browse_pulse_positions = [
+        0.0, 0.04, 0.09, 0.15, 0.22, 0.3, 0.39, 0.49, 0.6, 0.72, 0.84, 0.94,
+        1.0, 0.94, 0.84, 0.72, 0.6, 0.49, 0.39, 0.3, 0.22, 0.15, 0.09, 0.04,
+    ]
     for pulse_index, pulse_position in enumerate(browse_pulse_positions):
         pulse_color = blend_hex(green, "#D9D9D9", pulse_position)
+        order_pulse_color = blend_hex(red, panel_blue, pulse_position)
         style_name = f"BrowsePulse{pulse_index}.TButton"
         text_color = "white" if pulse_position < 0.6 else "black"
         style.configure(style_name, padding=(6, 3), background=pulse_color, foreground=text_color, borderwidth=0)
         style.map(style_name, background=[("active", pulse_color), ("pressed", pulse_color)])
         browse_pulse_styles.append(style_name)
+        add_style_name = f"AddPulse{pulse_index}.TButton"
+        style.configure(
+            add_style_name,
+            font=("Arial", 13, "bold"),
+            padding=(8, 3),
+            background=pulse_color,
+            foreground=text_color,
+            borderwidth=0,
+        )
+        style.map(add_style_name, background=[("active", pulse_color), ("pressed", pulse_color)])
+        add_pulse_styles.append(add_style_name)
+        order_style_name = f"OrderPulse{pulse_index}.TLabelframe"
+        style.configure(
+            order_style_name,
+            background=panel_blue,
+            bordercolor=order_pulse_color,
+            lightcolor=order_pulse_color,
+            darkcolor=order_pulse_color,
+            borderwidth=3,
+            relief="solid",
+        )
+        style.configure(f"{order_style_name}.Label", background=panel_blue, foreground="white")
+        order_pulse_styles.append(order_style_name)
 
     input_var = tk.StringVar()
     browse_button = None
@@ -132,13 +162,14 @@ def LaunchVisualizer():
     replace_var = tk.BooleanVar(value=False)
     dropdup_var = tk.BooleanVar(value=False)
     filter_var = tk.BooleanVar(value=False)
-    rowfilter_var = tk.BooleanVar(value=False)
     generate_var = tk.BooleanVar(value=False)
     validate_var = tk.BooleanVar(value=False)
 
+    normalize_target_var = tk.StringVar(value="column headers")
+    filter_target_var = tk.StringVar(value="rows")
     filter_mode_var = tk.StringVar(value="include")
-    row_filter_mode_var = tk.StringVar(value="include")
-    row_filter_condition_var = tk.StringVar(value="")
+    filter_match_mode_var = tk.StringVar(value="or")
+    filter_description_var = tk.StringVar(value="")
     generate_column_name_var = tk.StringVar(value="")
     generate_operator_var = tk.StringVar(value="+")
 
@@ -148,6 +179,20 @@ def LaunchVisualizer():
     validate_rows = []
     operation_order = []
     customizing_order_index = None
+    order_section_box = None
+    order_pulse_job = None
+    order_pulse_index = 0
+    tunable_nodes = {
+        "Normalize",
+        "Replace Values",
+        "Filter",
+        "Generate Column",
+        "Validate Required Columns",
+    }
+    tunable_add_buttons = {}
+    tunable_pulse_jobs = {}
+    tunable_pulse_index = {}
+    initializing_tunables = False
 
     preview_window = None
     preview_table_state = {}
@@ -155,6 +200,7 @@ def LaunchVisualizer():
 
     processed_window = None
     processed_table_state = {}
+    processed_title_label = None
     processed_title_var = tk.StringVar(value="")
     processed_diag_var = tk.StringVar(value="")
 
@@ -162,6 +208,7 @@ def LaunchVisualizer():
     processed_step_index = 0
     processed_play_job = None
     processed_is_playing = False
+    processed_play_button = None
 
     def choose_input():
         path = filedialog.askopenfilename(
@@ -184,7 +231,7 @@ def LaunchVisualizer():
 
         browse_button.configure(style=browse_pulse_styles[browse_pulse_index])
         browse_pulse_index = (browse_pulse_index + 1) % len(browse_pulse_styles)
-        root.after(180, pulse_browse_button)
+        root.after(90, pulse_browse_button)
 
     def update_run_pipeline_state(*args):
         if run_pipeline_button is None:
@@ -216,6 +263,11 @@ def LaunchVisualizer():
     def toggle_section(var, section_frame):
         show_section(section_frame, var.get())
 
+    def format_node_toggle_text(label, visible):
+        symbol = "^" if visible else "v"
+        cog = " ⚙" if label in tunable_nodes else ""
+        return f"{label} {symbol}{cog}"
+
     def toggle_settings(section_frame, button, label=None):
         visible = not section_frame.winfo_ismapped()
         show_section(section_frame, visible)
@@ -223,20 +275,30 @@ def LaunchVisualizer():
         if label is None:
             button.configure(text=symbol)
         else:
-            button.configure(text=f"{label} {symbol}")
+            button.configure(text=format_node_toggle_text(label, visible))
+
+    def normalize_target_key(target):
+        target = str(target).strip().lower()
+        if target in ("all values", "values", "cells"):
+            return "values"
+        return "headers"
+
+    def normalize_target_label(target):
+        if normalize_target_key(target) == "values":
+            return "all values"
+        return "column headers"
 
     def get_operation_summary(operation):
         name = operation["name"]
         meta = operation["meta"]
 
+        if name in ("Normalize", "Normalize Columns"):
+            return normalize_target_label(meta.get("normalize_target", "headers"))
         if name == "Replace Values":
             return f"{len(meta.get('replace_map', {}))} pairs"
-        if name == "Column Filter":
-            values = meta.get("filter_values", meta.get("filter_columns", []))
-            return f"{meta.get('filter_mode', 'include')} columns with {len(values)} values"
-        if name == "Row Filter":
-            values = meta.get("row_filter_values", [meta.get("condition", "")])
-            return f"{meta.get('row_filter_mode', 'include')} rows with {len(values)} values"
+        if name == "Filter":
+            values = meta.get("filter_values", [])
+            return f"{meta.get('filter_mode', 'include')} {meta.get('filter_target', 'rows')} with {len(values)} values"
         if name == "Generate Column":
             sources = ", ".join(meta.get("source_columns", []))
             return f"{meta.get('new_column', '')} = {sources}"
@@ -248,19 +310,17 @@ def LaunchVisualizer():
         name = operation["name"]
         meta = operation["meta"]
 
+        if name in ("Normalize", "Normalize Columns"):
+            return [f"target: {normalize_target_label(meta.get('normalize_target', 'headers'))}"]
         if name == "Replace Values":
             return [f"{old} -> {new}" for old, new in meta.get("replace_map", {}).items()]
-        if name == "Column Filter":
-            values = meta.get("filter_values", meta.get("filter_columns", []))
+        if name == "Filter":
+            values = meta.get("filter_values", [])
             return [
+                f"target: {meta.get('filter_target', 'rows')}",
                 f"mode: {meta.get('filter_mode', 'include')}",
+                f"logic: {meta.get('filter_match_mode', 'or')}",
                 f"values: {', '.join(values)}",
-            ]
-        if name == "Row Filter":
-            values = meta.get("row_filter_values", [meta.get("condition", "")])
-            return [
-                f"mode: {meta.get('row_filter_mode', 'include')}",
-                f"values: {', '.join(value for value in values if value)}",
             ]
         if name == "Generate Column":
             return [
@@ -274,9 +334,10 @@ def LaunchVisualizer():
 
     def is_configurable_operation(name):
         return name in (
+            "Normalize",
+            "Normalize Columns",
             "Replace Values",
-            "Column Filter",
-            "Row Filter",
+            "Filter",
             "Generate Column",
             "Validate Required Columns",
         )
@@ -345,11 +406,8 @@ def LaunchVisualizer():
 
         if name == "Replace Values":
             return flash_row_widgets(replace_rows, "from_entry", "to_entry")
-        if name == "Column Filter":
+        if name == "Filter":
             return flash_row_widgets(filter_rows, "entry")
-        if name == "Row Filter":
-            flash_widget_red(row_filter_condition_entry)
-            return True
         if name == "Generate Column":
             flash_widget_red(generate_column_name_entry)
             flash_row_widgets(generate_rows, "entry")
@@ -367,6 +425,22 @@ def LaunchVisualizer():
         editor.grid(row=1, column=0, columnspan=5, sticky="ew", padx=(18, 0), pady=(4, 0))
         editor.grid_columnconfigure(1, weight=1, uniform="replace_editor")
         editor.grid_columnconfigure(3, weight=1, uniform="replace_editor")
+
+        if name in ("Normalize", "Normalize Columns"):
+            target_var = tk.StringVar(value=normalize_target_label(meta.get("normalize_target", "headers")))
+            ttk.Label(editor, text="target", style="Storm.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=1)
+            ttk.Combobox(
+                editor,
+                textvariable=target_var,
+                values=("column headers", "all values"),
+                state="readonly",
+                width=15
+            ).grid(row=0, column=1, sticky="w", pady=1)
+
+            def save_normalize():
+                save_order_item_meta(row_index, {"normalize_target": normalize_target_key(target_var.get())})
+
+            return save_normalize
 
         if name == "Replace Values":
             replace_vars = []
@@ -397,51 +471,48 @@ def LaunchVisualizer():
 
             return save_replace_values
 
-        if name == "Column Filter":
+        if name == "Filter":
+            target_var = tk.StringVar(value=meta.get("filter_target", "rows"))
             mode_var = tk.StringVar(value=meta.get("filter_mode", "include"))
-            values_var = tk.StringVar(value=", ".join(meta.get("filter_values", meta.get("filter_columns", []))))
+            match_var = tk.StringVar(value=meta.get("filter_match_mode", "or"))
+            values_var = tk.StringVar(value=", ".join(meta.get("filter_values", [])))
 
-            ttk.Label(editor, text="mode", style="Storm.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=1)
-            ttk.Combobox(editor, textvariable=mode_var, values=("include", "exclude"), state="readonly", width=10).grid(row=0, column=1, sticky="w", pady=1)
-            ttk.Label(editor, text="values", style="Storm.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 6), pady=1)
-            ttk.Entry(editor, textvariable=values_var, width=28).grid(row=1, column=1, columnspan=3, sticky="ew", pady=1)
+            ttk.Label(editor, text="target", style="Storm.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=1)
+            ttk.Combobox(editor, textvariable=target_var, values=("rows", "columns"), state="readonly", width=10).grid(row=0, column=1, sticky="w", pady=1)
+            ttk.Label(editor, text="mode", style="Storm.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 6), pady=1)
+            ttk.Combobox(editor, textvariable=mode_var, values=("include", "exclude"), state="readonly", width=10).grid(row=1, column=1, sticky="w", pady=1)
+            ttk.Label(editor, text="logic", style="Storm.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 6), pady=1)
+            ttk.Combobox(editor, textvariable=match_var, values=("or", "and"), state="readonly", width=10).grid(row=2, column=1, sticky="w", pady=1)
+            ttk.Label(editor, text="values", style="Storm.TLabel").grid(row=3, column=0, sticky="w", padx=(0, 6), pady=1)
+            ttk.Entry(editor, textvariable=values_var, width=28).grid(row=3, column=1, columnspan=3, sticky="ew", pady=1)
 
-            def save_column_filter():
+            def save_filter():
                 values = split_entry_list(values_var.get())
                 if not values:
-                    messagebox.showerror("Missing Column Filter Config", "Column Filter needs at least one value.")
+                    messagebox.showerror("Missing Filter Config", "Filter needs at least one value.")
                     return
 
+                target = target_var.get().strip().lower()
+                if target not in ("rows", "columns"):
+                    target = "rows"
                 mode = mode_var.get().strip().lower()
                 if mode not in ("include", "exclude"):
                     mode = "include"
+                match_mode = match_var.get().strip().lower()
+                if match_mode not in ("and", "or"):
+                    match_mode = "or"
 
-                save_order_item_meta(row_index, {"filter_mode": mode, "filter_values": values})
+                save_order_item_meta(
+                    row_index,
+                    {
+                        "filter_target": target,
+                        "filter_mode": mode,
+                        "filter_match_mode": match_mode,
+                        "filter_values": values,
+                    }
+                )
 
-            return save_column_filter
-
-        if name == "Row Filter":
-            mode_var = tk.StringVar(value=meta.get("row_filter_mode", "include"))
-            values_var = tk.StringVar(value=", ".join(meta.get("row_filter_values", [meta.get("condition", "")])))
-
-            ttk.Label(editor, text="mode", style="Storm.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=1)
-            ttk.Combobox(editor, textvariable=mode_var, values=("include", "exclude"), state="readonly", width=10).grid(row=0, column=1, sticky="w", pady=1)
-            ttk.Label(editor, text="values", style="Storm.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 6), pady=1)
-            ttk.Entry(editor, textvariable=values_var, width=32).grid(row=1, column=1, columnspan=3, sticky="ew", pady=1)
-
-            def save_row_filter():
-                values = split_entry_list(values_var.get())
-                if not values:
-                    messagebox.showerror("Missing Row Filter Config", "Row Filter needs at least one value.")
-                    return
-
-                mode = mode_var.get().strip().lower()
-                if mode not in ("include", "exclude"):
-                    mode = "include"
-
-                save_order_item_meta(row_index, {"row_filter_mode": mode, "row_filter_values": values})
-
-            return save_row_filter
+            return save_filter
 
         if name == "Generate Column":
             new_column_var = tk.StringVar(value=meta.get("new_column", ""))
@@ -492,6 +563,30 @@ def LaunchVisualizer():
 
         return None
 
+    def update_order_empty_border():
+        nonlocal order_pulse_job, order_pulse_index
+
+        if order_section_box is None:
+            return
+
+        if operation_order:
+            if order_pulse_job is not None:
+                try:
+                    root.after_cancel(order_pulse_job)
+                except Exception:
+                    pass
+                order_pulse_job = None
+            order_section_box.configure(style="Storm.TLabelframe")
+            return
+
+        if not order_section_box.winfo_exists():
+            order_pulse_job = None
+            return
+
+        order_section_box.configure(style=order_pulse_styles[order_pulse_index])
+        order_pulse_index = (order_pulse_index + 1) % len(order_pulse_styles)
+        order_pulse_job = root.after(90, update_order_empty_border)
+
     def refresh_order_rows():
         for child in order_rows_frame.winfo_children():
             child.destroy()
@@ -502,7 +597,11 @@ def LaunchVisualizer():
                 text="No nodes added.",
                 style="Storm.TLabel"
             ).grid(row=0, column=0, sticky="w")
+            if order_pulse_job is None:
+                update_order_empty_border()
             return
+
+        update_order_empty_border()
 
         for row_index, operation in enumerate(operation_order):
             row_frame = ttk.Frame(order_rows_frame, style="StormPanel.TFrame")
@@ -618,6 +717,8 @@ def LaunchVisualizer():
         try:
             operation_order.append(build_operation_snapshot(name))
             refresh_order_rows()
+            if name in tunable_nodes:
+                reset_tuneables(name)
         except ValueError as error:
             set_settings_visible(name, True)
             root.update_idletasks()
@@ -625,11 +726,11 @@ def LaunchVisualizer():
 
     def set_settings_visible(name, visible):
         mapping = {
+            "Normalize": (lambda: normalize_info, lambda: normalize_toggle),
             "Normalize Columns": (lambda: normalize_info, lambda: normalize_toggle),
             "Replace Values": (lambda: replace_settings, lambda: replace_toggle),
             "Drop Duplicates": (lambda: dropdup_info, lambda: dropdup_toggle),
-            "Column Filter": (lambda: filter_settings, lambda: filter_toggle),
-            "Row Filter": (lambda: rowfilter_settings, lambda: rowfilter_toggle),
+            "Filter": (lambda: filter_settings, lambda: filter_toggle),
             "Generate Column": (lambda: generate_settings, lambda: generate_toggle),
             "Validate Required Columns": (lambda: validate_settings, lambda: validate_toggle),
         }
@@ -639,11 +740,114 @@ def LaunchVisualizer():
 
         section_getter, button_getter = mapping[name]
         show_section(section_getter(), visible)
-        button_getter().configure(text=f"{name} {'^' if visible else 'v'}")
+        button_getter().configure(text=format_node_toggle_text(name, visible))
 
     def clear_dynamic_rows(rows, refresh_callback):
         rows.clear()
         refresh_callback()
+
+    def row_values(rows, key="value_var"):
+        return [row_data[key].get().strip() for row_data in rows]
+
+    def tuneables_are_default(name):
+        if name in ("Normalize", "Normalize Columns"):
+            return normalize_target_key(normalize_target_var.get()) == "headers"
+        if name == "Replace Values":
+            return len(replace_rows) == 1 and replace_rows[0]["from_var"].get().strip() == "" and replace_rows[0]["to_var"].get().strip() == ""
+        if name == "Filter":
+            return (
+                filter_target_var.get() == "rows"
+                and filter_mode_var.get() == "include"
+                and filter_match_mode_var.get() == "or"
+                and len(filter_rows) == 1
+                and row_values(filter_rows) == [""]
+            )
+        if name == "Generate Column":
+            return (
+                generate_column_name_var.get().strip() == ""
+                and generate_operator_var.get() == "+"
+                and len(generate_rows) == 2
+                and row_values(generate_rows) == ["", ""]
+            )
+        if name == "Validate Required Columns":
+            return len(validate_rows) == 1 and row_values(validate_rows) == [""]
+        return True
+
+    def pulse_tunable_add_button(name):
+        if name not in tunable_add_buttons:
+            return
+        button = tunable_add_buttons[name]
+        if not button.winfo_exists():
+            return
+        if tuneables_are_default(name):
+            button.configure(style="Add.TButton")
+            tunable_pulse_jobs.pop(name, None)
+            return
+
+        index = tunable_pulse_index.get(name, 0)
+        button.configure(style=add_pulse_styles[index])
+        tunable_pulse_index[name] = (index + 1) % len(add_pulse_styles)
+        tunable_pulse_jobs[name] = root.after(90, lambda node_name=name: pulse_tunable_add_button(node_name))
+
+    def refresh_tunable_add_state(name):
+        if initializing_tunables or name not in tunable_nodes:
+            return
+
+        existing_job = tunable_pulse_jobs.pop(name, None)
+        if existing_job is not None:
+            try:
+                root.after_cancel(existing_job)
+            except Exception:
+                pass
+
+        if tuneables_are_default(name):
+            if name in tunable_add_buttons:
+                tunable_add_buttons[name].configure(style="Add.TButton")
+            return
+
+        tunable_pulse_index[name] = 0
+        pulse_tunable_add_button(name)
+
+    def reset_tuneables(name):
+        nonlocal initializing_tunables
+
+        initializing_tunables = True
+        try:
+            if name in ("Normalize", "Normalize Columns"):
+                normalize_target_var.set("column headers")
+            elif name == "Replace Values":
+                replace_rows.clear()
+                add_replace_row()
+            elif name == "Filter":
+                filter_target_var.set("rows")
+                filter_mode_var.set("include")
+                filter_match_mode_var.set("or")
+                filter_rows.clear()
+                add_filter_row()
+                on_filter_mode_changed()
+            elif name == "Generate Column":
+                generate_column_name_var.set("")
+                generate_operator_var.set("+")
+                generate_rows.clear()
+                add_generate_row()
+                add_generate_row()
+            elif name == "Validate Required Columns":
+                validate_rows.clear()
+                add_validate_row()
+        finally:
+            initializing_tunables = False
+
+        refresh_tunable_add_state(name)
+
+    def mark_tuneables_changed(name):
+        refresh_tunable_add_state(name)
+
+    normalize_target_var.trace_add("write", lambda *args: mark_tuneables_changed("Normalize"))
+    filter_target_var.trace_add("write", lambda *args: mark_tuneables_changed("Filter"))
+    filter_mode_var.trace_add("write", lambda *args: mark_tuneables_changed("Filter"))
+    filter_match_mode_var.trace_add("write", lambda *args: mark_tuneables_changed("Filter"))
+    generate_column_name_var.trace_add("write", lambda *args: mark_tuneables_changed("Generate Column"))
+    generate_operator_var.trace_add("write", lambda *args: mark_tuneables_changed("Generate Column"))
 
     def customize_order_item(index):
         nonlocal customizing_order_index
@@ -663,23 +867,26 @@ def LaunchVisualizer():
             return "CSV Preview"
         return os.path.basename(input_path)
 
-    def get_processed_output_path():
+    def get_default_save_folder():
         input_path = input_var.get().strip()
         if not input_path:
             return None
 
-        folder = os.path.dirname(input_path)
+        return os.path.dirname(input_path)
+
+    def get_default_save_filename():
+        input_path = input_var.get().strip()
+        if not input_path:
+            return "Processed_Table.csv"
+
         filename = os.path.basename(input_path)
         stem, ext = os.path.splitext(filename)
         if not ext:
             ext = ".csv"
-        return os.path.join(folder, f"Processed_{stem}{ext}")
+        return f"Processed_{stem}{ext}"
 
-    def get_processed_output_filename():
-        output_path = get_processed_output_path()
-        if not output_path:
-            return "Processed Table"
-        return os.path.basename(output_path)
+    def get_processed_window_title():
+        return "Processed Preview"
 
     def place_window_right_of(window, anchor_window, width, height):
         anchor_window.update_idletasks()
@@ -843,7 +1050,7 @@ def LaunchVisualizer():
         added_bg = "#d9f5d9"
         modified_bg = "#ffe7c2"
         deleted_bg = "#ffd6d6"
-
+        
         def hide_tooltip():
             if table_state["tooltip"] is not None:
                 try:
@@ -1015,11 +1222,37 @@ def LaunchVisualizer():
 
         preview_table_state = create_canvas_table(table_holder)
 
+    def save_processed_output():
+        if not processed_steps:
+            return
+
+        initial_dir = get_default_save_folder()
+        save_options = {
+            "parent": processed_window if processed_window is not None and processed_window.winfo_exists() else root,
+            "title": "Save processed CSV",
+            "initialfile": get_default_save_filename(),
+            "defaultextension": ".csv",
+            "filetypes": [("CSV files", "*.csv"), ("All files", "*.*")],
+        }
+        if initial_dir:
+            save_options["initialdir"] = initial_dir
+
+        save_path = filedialog.asksaveasfilename(**save_options)
+        if not save_path:
+            return
+
+        try:
+            processed_steps[-1]["data"].to_csv(save_path, index=False)
+            if processed_window is not None and processed_window.winfo_exists():
+                processed_window.title(os.path.basename(save_path))
+        except Exception as error:
+            messagebox.showerror("Save Error", str(error))
+
     def ensure_processed_window():
-        nonlocal processed_window, processed_table_state
+        nonlocal processed_window, processed_table_state, processed_play_button, processed_title_label
 
         if processed_window is not None and processed_window.winfo_exists():
-            processed_window.title(get_processed_output_filename())
+            processed_window.title(get_processed_window_title())
             processed_window.lift()
             return
 
@@ -1027,7 +1260,7 @@ def LaunchVisualizer():
             ensure_preview_window()
 
         processed_window = tk.Toplevel(root)
-        processed_window.title(get_processed_output_filename())
+        processed_window.title(get_processed_window_title())
         anchor_window = preview_window if preview_window is not None and preview_window.winfo_exists() else root
         place_window_right_of(processed_window, anchor_window, 1050, 700)
         processed_window.configure(bg=storm_blue)
@@ -1035,11 +1268,12 @@ def LaunchVisualizer():
         processed_frame = ttk.Frame(processed_window, padding=10, style="Storm.TFrame")
         processed_frame.pack(fill="both", expand=True)
 
-        ttk.Label(
+        processed_title_label = ttk.Label(
             processed_frame,
             textvariable=processed_title_var,
-            style="StormTop.TLabel"
-        ).pack(anchor="w", pady=(0, 6))
+            style="ProcessedTitle.TLabel"
+        )
+        processed_title_label.pack(anchor="w", pady=(0, 6))
 
         ttk.Label(
             processed_frame,
@@ -1077,17 +1311,36 @@ def LaunchVisualizer():
 
         ttk.Button(
             controls_frame,
-            text="Previous",
+            text="\u2190",
+            width=3,
             style="Small.TButton",
             command=show_previous_processed_step
         ).pack(side="left", padx=(0, 6))
 
+        processed_play_button = ttk.Button(
+            controls_frame,
+            text="\u23f8" if processed_is_playing else "\u25b6",
+            width=3,
+            style="Small.TButton",
+            command=toggle_processed_playback
+        )
+        processed_play_button.pack(side="left", padx=(0, 6))
+
         ttk.Button(
             controls_frame,
-            text="Next",
+            text="\u2192",
+            width=3,
             style="Small.TButton",
             command=show_next_processed_step
         ).pack(side="left", padx=(0, 6))
+
+        ttk.Button(
+            controls_frame,
+            text="💾",
+            width=3,
+            style="Small.TButton",
+            command=save_processed_output
+        ).pack(side="left", padx=(8, 6))
 
         table_holder = ttk.Frame(processed_frame, style="Storm.TFrame")
         table_holder.pack(fill="both", expand=True)
@@ -1104,10 +1357,13 @@ def LaunchVisualizer():
         return pd.read_csv(input_path).head(50)
 
     def build_operation_snapshot(name):
-        if name == "Normalize Columns":
+        if name in ("Normalize", "Normalize Columns"):
+            target = normalize_target_key(normalize_target_var.get())
             return {
-                "name": name,
-                "meta": {},
+                "name": "Normalize",
+                "meta": {
+                    "normalize_target": target,
+                },
             }
 
         if name == "Replace Values":
@@ -1127,36 +1383,28 @@ def LaunchVisualizer():
                 "meta": {},
             }
 
-        if name == "Column Filter":
+        if name == "Filter":
             filter_values = build_filter_columns()
             if not filter_values:
-                raise ValueError("Column Filter needs at least one value before it can be added.")
+                raise ValueError("Filter needs at least one value before it can be added.")
 
+            target = filter_target_var.get().strip().lower()
+            if target not in ("rows", "columns"):
+                target = "rows"
             mode = filter_mode_var.get().strip().lower()
             if mode not in ("include", "exclude"):
                 mode = "include"
+            match_mode = filter_match_mode_var.get().strip().lower()
+            if match_mode not in ("and", "or"):
+                match_mode = "or"
 
             return {
                 "name": name,
                 "meta": {
+                    "filter_target": target,
                     "filter_mode": mode,
+                    "filter_match_mode": match_mode,
                     "filter_values": list(filter_values),
-                },
-            }
-
-        if name == "Row Filter":
-            values = split_entry_list(row_filter_condition_var.get())
-            if not values:
-                raise ValueError("Row Filter needs at least one value before it can be added.")
-            mode = row_filter_mode_var.get().strip().lower()
-            if mode not in ("include", "exclude"):
-                mode = "include"
-
-            return {
-                "name": name,
-                "meta": {
-                    "row_filter_mode": mode,
-                    "row_filter_values": values,
                 },
             }
 
@@ -1197,16 +1445,19 @@ def LaunchVisualizer():
         name = operation["name"]
         meta = operation["meta"]
 
-        if name == "Normalize Columns":
-            node = NormalizeColumnsNode()
+        if name in ("Normalize", "Normalize Columns"):
+            node = NormalizeColumnsNode(Target=meta.get("normalize_target", "headers"))
         elif name == "Replace Values":
             node = ReplaceValuesNode(meta["replace_map"])
         elif name == "Drop Duplicates":
             node = DropDuplicatesNode()
-        elif name == "Column Filter":
-            node = ColumnFilterNode(Mode=meta["filter_mode"], MatchValues=meta.get("filter_values", meta.get("filter_columns", [])))
-        elif name == "Row Filter":
-            node = RowFilterNode(Mode=meta.get("row_filter_mode", "include"), MatchValues=meta.get("row_filter_values", [meta.get("condition", "")]))
+        elif name == "Filter":
+            node = FilterNode(
+                Target=meta.get("filter_target", "rows"),
+                Mode=meta["filter_mode"],
+                MatchMode=meta.get("filter_match_mode", "or"),
+                MatchValues=meta.get("filter_values", []),
+            )
         elif name == "Generate Column":
             node = GenerateColumnNode(meta["new_column"], meta["operator"], meta["source_columns"])
         elif name == "Validate Required Columns":
@@ -1252,7 +1503,19 @@ def LaunchVisualizer():
             "added_column_cells": set(),
         }
 
-        if step_name == "Normalize Columns":
+        if step_name in ("Normalize", "Normalize Columns"):
+            target = normalize_target_key(meta.get("normalize_target", "headers"))
+            if target == "values":
+                shared_columns = [column for column in curr_columns if column in prev_columns]
+                for row_index in range(min(len(prev), len(curr))):
+                    for col in shared_columns:
+                        old_value = prev.at[row_index, col]
+                        new_value = curr.at[row_index, col]
+                        if not values_equal(old_value, new_value):
+                            diff["modified_cells"].add((row_index, col))
+                            diff["modified_old_values"][(row_index, col)] = old_value
+                return diff
+
             for col_index, prev_col in enumerate(prev_columns):
                 if col_index >= len(curr_columns):
                     break
@@ -1317,38 +1580,56 @@ def LaunchVisualizer():
                 diff["added_rows"] = set(range(len(prev), len(curr)))
             return diff
 
-        if step_name == "Column Filter":
+        if step_name == "Filter":
+            target = meta.get("filter_target", "rows")
             mode = meta.get("filter_mode", "include")
+            match_mode = meta.get("filter_match_mode", "or")
             filter_values = {str(value).strip().lower() for value in meta.get("filter_values", meta.get("filter_columns", []))}
-            matching_columns = []
 
-            for column_name in prev_columns:
-                column_values = set(prev[column_name].map(lambda value: str(value).strip().lower()).tolist())
-                column_values.add(str(column_name).strip().lower())
-                if column_values.intersection(filter_values):
-                    matching_columns.append(column_name)
+            def value_matches(existing_value, wanted_value):
+                existing_parsed = parse_literal_value(str(existing_value))
+                wanted_parsed = parse_literal_value(str(wanted_value))
+                try:
+                    if existing_parsed == wanted_parsed:
+                        return True
+                except Exception:
+                    pass
 
-            if mode == "include":
-                diff["deleted_columns"] = [col for col in prev_columns if col not in matching_columns]
+                existing_text = str(existing_value).strip().lower()
+                wanted_text = str(wanted_value).strip().lower()
+                return wanted_text != "" and wanted_text in existing_text
+
+            def values_match(values):
+                if match_mode == "and":
+                    return all(
+                        any(value_matches(existing_value, wanted_value) for existing_value in values)
+                        for wanted_value in filter_values
+                    )
+                return any(
+                    value_matches(existing_value, wanted_value)
+                    for existing_value in values
+                    for wanted_value in filter_values
+                )
+
+            if target == "columns":
+                matching_columns = [
+                    column_name
+                    for column_name in prev_columns
+                    if values_match(prev[column_name].tolist())
+                ]
+                if mode == "include":
+                    diff["deleted_columns"] = [col for col in prev_columns if col not in matching_columns]
+                else:
+                    diff["deleted_columns"] = matching_columns
             else:
-                diff["deleted_columns"] = matching_columns
-
-            return diff
-
-        if step_name == "Row Filter":
-            values = {str(value).strip().lower() for value in meta.get("row_filter_values", [meta.get("condition", "")]) if str(value).strip()}
-            if values:
                 matching_labels = set(
                     previous_df[
                         previous_df.apply(
-                            lambda row: bool(
-                                {str(value).strip().lower() for value in row.tolist()}.intersection(values)
-                            ),
+                            lambda row: values_match(row.tolist()),
                             axis=1
                         )
                     ].index.tolist()
                 )
-                mode = meta.get("row_filter_mode", "include")
                 diff["deleted_rows"] = {
                     row_position
                     for row_position, row_label in enumerate(previous_df.index)
@@ -1428,6 +1709,13 @@ def LaunchVisualizer():
             f"Columns: {len(previous_df.columns)} -> {len(current_df.columns)}"
         )
 
+    def build_total_diagnostics(start_df, final_df, duration_seconds):
+        return (
+            f"Total time: {duration_seconds:.3f}s\n"
+            f"Total rows: {len(start_df)} -> {len(final_df)}\n"
+            f"Total columns: {len(start_df.columns)} -> {len(final_df.columns)}"
+        )
+
     def refresh_preview():
         try:
             ensure_preview_window()
@@ -1453,8 +1741,11 @@ def LaunchVisualizer():
         ensure_processed_window()
 
         step = processed_steps[processed_step_index]
-        processed_window.title(get_processed_output_filename())
+        processed_window.title(get_processed_window_title())
         processed_title_var.set(f"{step['name']} ({processed_step_index + 1}/{len(processed_steps)})")
+        if processed_title_label is not None and processed_title_label.winfo_exists():
+            title_style = "ProcessedFinalTitle.TLabel" if step["name"] == "Processed" else "ProcessedTitle.TLabel"
+            processed_title_label.configure(style=title_style)
         processed_diag_var.set(step["diagnostics"])
 
         render_canvas_table(
@@ -1471,6 +1762,11 @@ def LaunchVisualizer():
         if processed_play_job is not None and processed_window is not None and processed_window.winfo_exists():
             processed_window.after_cancel(processed_play_job)
         processed_play_job = None
+        update_processed_play_button()
+
+    def update_processed_play_button():
+        if processed_play_button is not None and processed_play_button.winfo_exists():
+            processed_play_button.configure(text="\u23f8" if processed_is_playing else "\u25b6")
 
     def play_processed_step():
         nonlocal processed_play_job, processed_is_playing, processed_step_index
@@ -1478,18 +1774,25 @@ def LaunchVisualizer():
         if not processed_is_playing or not processed_steps:
             return
 
+        update_processed_play_button()
         render_processed_step()
+        processed_step_index = (processed_step_index + 1) % len(processed_steps)
+        step_delay = 1000 if processed_steps and processed_steps[processed_step_index - 1]["name"] == "Processed" else 500
+        processed_play_job = processed_window.after(step_delay, play_processed_step)
 
-        if processed_step_index >= len(processed_steps) - 1:
-            processed_is_playing = False
-            processed_play_job = None
+    def toggle_processed_playback():
+        nonlocal processed_is_playing
+
+        if not processed_steps:
             return
 
-        total_duration_ms = 1000
-        step_delay = max(80, int(total_duration_ms / max(1, len(processed_steps) - 1)))
+        if processed_is_playing:
+            stop_processed_playback()
+            return
 
-        processed_step_index += 1
-        processed_play_job = processed_window.after(step_delay, play_processed_step)
+        processed_is_playing = True
+        update_processed_play_button()
+        play_processed_step()
 
     def autoplay_processed_steps():
         nonlocal processed_is_playing, processed_step_index
@@ -1500,6 +1803,7 @@ def LaunchVisualizer():
         stop_processed_playback()
         processed_step_index = 0
         processed_is_playing = True
+        update_processed_play_button()
         play_processed_step()
 
     def show_previous_processed_step():
@@ -1509,10 +1813,8 @@ def LaunchVisualizer():
             return
 
         stop_processed_playback()
-
-        if processed_step_index > 0:
-            processed_step_index -= 1
-            render_processed_step()
+        processed_step_index = (processed_step_index - 1) % len(processed_steps)
+        render_processed_step()
 
     def show_next_processed_step():
         nonlocal processed_step_index
@@ -1521,13 +1823,18 @@ def LaunchVisualizer():
             return
 
         stop_processed_playback()
-
-        if processed_step_index < len(processed_steps) - 1:
-            processed_step_index += 1
-            render_processed_step()
+        processed_step_index = (processed_step_index + 1) % len(processed_steps)
+        render_processed_step()
 
     def on_filter_mode_changed(event=None):
-        return
+        target = filter_target_var.get().strip().lower()
+        mode = filter_mode_var.get().strip().lower()
+        match_mode = filter_match_mode_var.get().strip().lower()
+
+        subject = "rows" if target == "rows" else "columns"
+        action = "keep" if mode == "include" else "remove"
+        joiner = "all listed values" if match_mode == "and" else "any listed value"
+        filter_description_var.set(f"{mode}: {action} {subject} with {joiner}.")
 
     def refresh_replace_rows():
         for child in replace_rows_frame.winfo_children():
@@ -1556,12 +1863,17 @@ def LaunchVisualizer():
             ).grid(row=0, column=2, sticky="e")
 
     def add_replace_row(from_value="", to_value=""):
+        from_var = tk.StringVar(value=from_value)
+        to_var = tk.StringVar(value=to_value)
+        from_var.trace_add("write", lambda *args: mark_tuneables_changed("Replace Values"))
+        to_var.trace_add("write", lambda *args: mark_tuneables_changed("Replace Values"))
         row_data = {
-            "from_var": tk.StringVar(value=from_value),
-            "to_var": tk.StringVar(value=to_value),
+            "from_var": from_var,
+            "to_var": to_var,
         }
         replace_rows.append(row_data)
         refresh_replace_rows()
+        mark_tuneables_changed("Replace Values")
 
     def delete_replace_row(index):
         if 0 <= index < len(replace_rows):
@@ -1571,6 +1883,7 @@ def LaunchVisualizer():
             add_replace_row()
         else:
             refresh_replace_rows()
+            mark_tuneables_changed("Replace Values")
 
     def build_replace_map():
         replace_map = {}
@@ -1613,11 +1926,14 @@ def LaunchVisualizer():
             ).grid(row=0, column=1, sticky="e")
 
     def add_filter_row(value=""):
+        value_var = tk.StringVar(value=value)
+        value_var.trace_add("write", lambda *args: mark_tuneables_changed("Filter"))
         row_data = {
-            "value_var": tk.StringVar(value=value),
+            "value_var": value_var,
         }
         filter_rows.append(row_data)
         refresh_filter_rows()
+        mark_tuneables_changed("Filter")
 
     def delete_filter_row(index):
         if 0 <= index < len(filter_rows):
@@ -1627,6 +1943,7 @@ def LaunchVisualizer():
             add_filter_row()
         else:
             refresh_filter_rows()
+            mark_tuneables_changed("Filter")
 
     def build_filter_columns():
         cols = []
@@ -1658,11 +1975,14 @@ def LaunchVisualizer():
             ).grid(row=0, column=1, sticky="e")
 
     def add_generate_row(value=""):
+        value_var = tk.StringVar(value=value)
+        value_var.trace_add("write", lambda *args: mark_tuneables_changed("Generate Column"))
         row_data = {
-            "value_var": tk.StringVar(value=value),
+            "value_var": value_var,
         }
         generate_rows.append(row_data)
         refresh_generate_rows()
+        mark_tuneables_changed("Generate Column")
 
     def delete_generate_row(index):
         if 0 <= index < len(generate_rows):
@@ -1672,6 +1992,7 @@ def LaunchVisualizer():
             add_generate_row()
         else:
             refresh_generate_rows()
+            mark_tuneables_changed("Generate Column")
 
     def build_generate_columns():
         cols = []
@@ -1703,11 +2024,14 @@ def LaunchVisualizer():
             ).grid(row=0, column=1, sticky="e")
 
     def add_validate_row(value=""):
+        value_var = tk.StringVar(value=value)
+        value_var.trace_add("write", lambda *args: mark_tuneables_changed("Validate Required Columns"))
         row_data = {
-            "value_var": tk.StringVar(value=value),
+            "value_var": value_var,
         }
         validate_rows.append(row_data)
         refresh_validate_rows()
+        mark_tuneables_changed("Validate Required Columns")
 
     def delete_validate_row(index):
         if 0 <= index < len(validate_rows):
@@ -1717,6 +2041,7 @@ def LaunchVisualizer():
             add_validate_row()
         else:
             refresh_validate_rows()
+            mark_tuneables_changed("Validate Required Columns")
 
     def build_validate_columns():
         cols = []
@@ -1738,12 +2063,9 @@ def LaunchVisualizer():
                 messagebox.showerror("Missing Input", "Please choose an input CSV file.")
                 return
 
-            output_path = get_processed_output_path()
-            if not output_path:
-                messagebox.showerror("Missing Input", "Please choose an input CSV file.")
-                return
-
             Data = pd.read_csv(input_path)
+            start_data = Data.copy()
+            pipeline_started_at = time.perf_counter()
 
             steps = []
             raw_display = Data.reset_index(drop=True).head(100).copy()
@@ -1789,7 +2111,15 @@ def LaunchVisualizer():
                     "diagnostics": diagnostics,
                 })
 
-            Data.to_csv(output_path, index=False)
+            total_duration_seconds = time.perf_counter() - pipeline_started_at
+            steps.append({
+                "name": "Processed",
+                "data": Data.copy(),
+                "display_df": Data.reset_index(drop=True).head(100).copy(),
+                "cell_colors": {},
+                "hover_old_values": {},
+                "diagnostics": build_total_diagnostics(start_data, Data, total_duration_seconds),
+            })
 
             processed_steps = steps
             processed_step_index = 0
@@ -1817,26 +2147,14 @@ def LaunchVisualizer():
     main.grid(row=1, column=0, sticky="nsew")
     main.grid_rowconfigure(0, weight=1)
     main.grid_columnconfigure(0, weight=1)
+    main.grid_columnconfigure(1, weight=0)
+    main.grid_columnconfigure(2, weight=1)
 
-    global_canvas = tk.Canvas(main, bg=storm_blue, highlightthickness=0, bd=0)
-    global_canvas.grid(row=0, column=0, sticky="nsew")
-    global_scrollbar = ttk.Scrollbar(main, orient="vertical", command=global_canvas.yview)
-    global_scrollbar.grid(row=0, column=1, sticky="ns")
-    global_canvas.configure(yscrollcommand=global_scrollbar.set)
-
-    global_content = ttk.Frame(global_canvas, style="Storm.TFrame")
-    global_window_id = global_canvas.create_window((0, 0), window=global_content, anchor="nw")
+    global_content = ttk.Frame(main, style="Storm.TFrame", width=520)
+    global_content.grid(row=0, column=1, sticky="nsew")
+    global_content.grid_propagate(False)
     global_content.grid_columnconfigure(0, weight=1)
     global_content.grid_rowconfigure(1, weight=1)
-
-    def on_global_content_configure(event=None):
-        global_canvas.configure(scrollregion=global_canvas.bbox("all"))
-
-    def on_global_canvas_configure(event):
-        global_canvas.itemconfigure(global_window_id, width=event.width)
-
-    global_content.bind("<Configure>", on_global_content_configure)
-    global_canvas.bind("<Configure>", on_global_canvas_configure)
 
     scroll_targets = {}
     scroll_regions = []
@@ -1871,9 +2189,12 @@ def LaunchVisualizer():
             if widget in scroll_targets:
                 return scroll_targets[widget]
             widget = getattr(widget, "master", None)
-        return global_canvas
+        return None
 
     def can_scroll_canvas(canvas, units):
+        if canvas is None:
+            return False
+
         top, bottom = canvas.yview()
         if units < 0:
             return top > 0.0
@@ -1882,6 +2203,9 @@ def LaunchVisualizer():
     def scroll_canvas_from_wheel(event):
         widget = root.winfo_containing(event.x_root, event.y_root)
         canvas = find_scroll_canvas(widget, event.x_root, event.y_root)
+        if canvas is None:
+            return None
+
         if event.num == 4:
             units = -1
         elif event.num == 5:
@@ -1896,7 +2220,6 @@ def LaunchVisualizer():
     root.bind_all("<MouseWheel>", scroll_canvas_from_wheel)
     root.bind_all("<Button-4>", scroll_canvas_from_wheel)
     root.bind_all("<Button-5>", scroll_canvas_from_wheel)
-    register_scroll_target(global_canvas, main, global_content)
 
     def create_scrollable_section(parent, title, row, height, row_weight=0):
         section_box = ttk.LabelFrame(parent, text=title, padding=10, style="Storm.TLabelframe")
@@ -1926,10 +2249,10 @@ def LaunchVisualizer():
         scroll_sections.append((section_box, section_canvas))
         scroll_sections.append((section_canvas, section_canvas))
 
-        return section_content
+        return section_content, section_box
 
-    order_rows_frame = create_scrollable_section(global_content, "Run Order", 0, 135)
-    nodes_box = create_scrollable_section(global_content, "Pipeline Nodes", 1, 260, row_weight=1)
+    order_rows_frame, order_section_box = create_scrollable_section(global_content, "Run Order", 0, 169)
+    nodes_box, nodes_section_box = create_scrollable_section(global_content, "Pipeline Nodes", 1, 325, row_weight=1)
 
     node_row = 0
 
@@ -1940,26 +2263,46 @@ def LaunchVisualizer():
     normalize_header = ttk.Frame(normalize_box, style="StormPanel.TFrame")
     normalize_header.grid(row=0, column=0, sticky="ew")
     normalize_header.grid_columnconfigure(1, weight=1)
-    ttk.Button(
+    normalize_add_button = ttk.Button(
         normalize_header,
         text="+",
         width=4,
         style="Add.TButton",
-        command=lambda: add_order_item("Normalize Columns")
-    ).grid(row=0, column=0, sticky="w", padx=(0, 6))
-    normalize_toggle = ttk.Button(normalize_header, text="Normalize Columns v", style="NodeToggle.TButton")
+        command=lambda: add_order_item("Normalize")
+    )
+    normalize_add_button.grid(row=0, column=0, sticky="w", padx=(0, 6))
+    tunable_add_buttons["Normalize"] = normalize_add_button
+    normalize_toggle = ttk.Button(normalize_header, text=format_node_toggle_text("Normalize", False), style="NodeToggle.TButton")
     normalize_toggle.grid(row=0, column=1, sticky="ew")
-    normalize_toggle.configure(command=lambda: toggle_settings(normalize_info, normalize_toggle, "Normalize Columns"))
+    normalize_toggle.configure(command=lambda: toggle_settings(normalize_info, normalize_toggle, "Normalize"))
 
     normalize_info = ttk.Frame(normalize_box, padding=(24, 6, 0, 0), style="StormPanel.TFrame")
     normalize_info.grid(row=1, column=0, sticky="ew")
+    normalize_info.grid_columnconfigure(0, weight=0)
+    normalize_info.grid_columnconfigure(1, weight=1)
     ttk.Label(
         normalize_info,
-        text="Renames every column into a clean format: trim spaces, lowercase text, and change spaces to underscores.",
+        text="Cleans text by trimming spaces, lowercasing it, and changing spaces to underscores.",
         style="Storm.TLabel",
         wraplength=360,
         justify="left"
-    ).grid(row=0, column=0, sticky="w")
+    ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+    ttk.Label(normalize_info, text="Target", style="Storm.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 8))
+    ttk.Combobox(
+        normalize_info,
+        textvariable=normalize_target_var,
+        values=["column headers", "all values"],
+        state="readonly",
+        width=16
+    ).grid(row=1, column=1, sticky="w")
+
+    ttk.Button(
+        normalize_info,
+        text="Reset",
+        style="Small.TButton",
+        command=lambda: reset_tuneables("Normalize")
+    ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
     node_row += 1
 
@@ -1970,14 +2313,16 @@ def LaunchVisualizer():
     replace_header = ttk.Frame(replace_box, style="StormPanel.TFrame")
     replace_header.grid(row=0, column=0, sticky="ew")
     replace_header.grid_columnconfigure(1, weight=1)
-    ttk.Button(
+    replace_add_button = ttk.Button(
         replace_header,
         text="+",
         width=4,
         style="Add.TButton",
         command=lambda: add_order_item("Replace Values"),
-    ).grid(row=0, column=0, sticky="w", padx=(0, 6))
-    replace_toggle = ttk.Button(replace_header, text="Replace Values v", style="NodeToggle.TButton")
+    )
+    replace_add_button.grid(row=0, column=0, sticky="w", padx=(0, 6))
+    tunable_add_buttons["Replace Values"] = replace_add_button
+    replace_toggle = ttk.Button(replace_header, text=format_node_toggle_text("Replace Values", False), style="NodeToggle.TButton")
     replace_toggle.grid(row=0, column=1, sticky="ew")
     replace_toggle.configure(command=lambda: toggle_settings(replace_settings, replace_toggle, "Replace Values"))
 
@@ -2015,11 +2360,12 @@ def LaunchVisualizer():
         command=add_replace_row
     ).grid(row=3, column=0, sticky="w", pady=(6, 0))
 
-    ttk.Label(
+    ttk.Button(
         replace_settings,
-        text="Example: UNKNOWN -> Unknown",
-        style="Storm.TLabel"
-    ).grid(row=4, column=0, sticky="w", pady=(4, 0))
+        text="Reset",
+        style="Small.TButton",
+        command=lambda: reset_tuneables("Replace Values")
+    ).grid(row=4, column=0, sticky="w", pady=(6, 0))
 
     node_row += 1
 
@@ -2037,7 +2383,7 @@ def LaunchVisualizer():
         style="Add.TButton",
         command=lambda: add_order_item("Drop Duplicates")
     ).grid(row=0, column=0, sticky="w", padx=(0, 6))
-    dropdup_toggle = ttk.Button(dropdup_header, text="Drop Duplicates v", style="NodeToggle.TButton")
+    dropdup_toggle = ttk.Button(dropdup_header, text=format_node_toggle_text("Drop Duplicates", False), style="NodeToggle.TButton")
     dropdup_toggle.grid(row=0, column=1, sticky="ew")
     dropdup_toggle.configure(command=lambda: toggle_settings(dropdup_info, dropdup_toggle, "Drop Duplicates"))
 
@@ -2060,30 +2406,45 @@ def LaunchVisualizer():
     filter_header = ttk.Frame(filter_box, style="StormPanel.TFrame")
     filter_header.grid(row=0, column=0, sticky="ew")
     filter_header.grid_columnconfigure(1, weight=1)
-    ttk.Button(
+    filter_add_button = ttk.Button(
         filter_header,
         text="+",
         width=4,
         style="Add.TButton",
-        command=lambda: add_order_item("Column Filter"),
-    ).grid(row=0, column=0, sticky="w", padx=(0, 6))
-    filter_toggle = ttk.Button(filter_header, text="Column Filter v", style="NodeToggle.TButton")
+        command=lambda: add_order_item("Filter"),
+    )
+    filter_add_button.grid(row=0, column=0, sticky="w", padx=(0, 6))
+    tunable_add_buttons["Filter"] = filter_add_button
+    filter_toggle = ttk.Button(filter_header, text=format_node_toggle_text("Filter", False), style="NodeToggle.TButton")
     filter_toggle.grid(row=0, column=1, sticky="ew")
-    filter_toggle.configure(command=lambda: toggle_settings(filter_settings, filter_toggle, "Column Filter"))
+    filter_toggle.configure(command=lambda: toggle_settings(filter_settings, filter_toggle, "Filter"))
 
     filter_settings = ttk.Frame(filter_box, padding=(24, 6, 0, 0), style="StormPanel.TFrame")
     filter_settings.grid(row=1, column=0, sticky="ew")
     filter_settings.grid_columnconfigure(0, weight=1)
+    filter_settings.grid_columnconfigure(1, weight=0)
 
     ttk.Label(
         filter_settings,
-        text="Include: keep columns with value X. Exclude: remove columns with value X.",
+        textvariable=filter_description_var,
         style="Storm.TLabel",
         wraplength=360,
         justify="left"
-    ).grid(row=0, column=0, sticky="w", pady=(0, 6))
+    ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
 
-    ttk.Label(filter_settings, text="Mode", style="Storm.TLabel").grid(row=1, column=0, sticky="w")
+    ttk.Label(filter_settings, text="Target", style="Storm.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(0, 6))
+
+    filter_target_combo = ttk.Combobox(
+        filter_settings,
+        textvariable=filter_target_var,
+        values=["rows", "columns"],
+        state="readonly",
+        width=14
+    )
+    filter_target_combo.grid(row=1, column=1, sticky="e", pady=(0, 6))
+    filter_target_combo.bind("<<ComboboxSelected>>", on_filter_mode_changed)
+
+    ttk.Label(filter_settings, text="Mode", style="Storm.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=(0, 6))
 
     filter_mode_combo = ttk.Combobox(
         filter_settings,
@@ -2092,13 +2453,25 @@ def LaunchVisualizer():
         state="readonly",
         width=14
     )
-    filter_mode_combo.grid(row=2, column=0, sticky="w", pady=(2, 6))
+    filter_mode_combo.grid(row=2, column=1, sticky="e", pady=(0, 6))
     filter_mode_combo.bind("<<ComboboxSelected>>", on_filter_mode_changed)
 
-    ttk.Label(filter_settings, text="Value", style="Storm.TLabel").grid(row=3, column=0, sticky="w")
+    ttk.Label(filter_settings, text="Logic", style="Storm.TLabel").grid(row=3, column=0, sticky="w", padx=(0, 8), pady=(0, 6))
+
+    filter_match_combo = ttk.Combobox(
+        filter_settings,
+        textvariable=filter_match_mode_var,
+        values=["or", "and"],
+        state="readonly",
+        width=14
+    )
+    filter_match_combo.grid(row=3, column=1, sticky="e", pady=(0, 6))
+    filter_match_combo.bind("<<ComboboxSelected>>", on_filter_mode_changed)
+
+    ttk.Label(filter_settings, text="Values", style="Storm.TLabel").grid(row=4, column=0, columnspan=2, sticky="w")
 
     filter_rows_frame = ttk.Frame(filter_settings, style="StormPanel.TFrame")
-    filter_rows_frame.grid(row=4, column=0, sticky="ew")
+    filter_rows_frame.grid(row=5, column=0, columnspan=2, sticky="ew")
     filter_rows_frame.grid_columnconfigure(0, weight=1)
 
     ttk.Button(
@@ -2106,64 +2479,13 @@ def LaunchVisualizer():
         text="+ Add Row",
         style="Small.TButton",
         command=add_filter_row
-    ).grid(row=5, column=0, sticky="w", pady=(6, 0))
-
-    ttk.Label(
-        filter_settings,
-        text="Example: UNKNOWN",
-        style="Storm.TLabel"
-    ).grid(row=6, column=0, sticky="w", pady=(4, 0))
-
-    node_row += 1
-
-    rowfilter_box = ttk.Frame(nodes_box, style="StormPanel.TFrame")
-    rowfilter_box.grid(row=node_row, column=0, sticky="ew", pady=(0, 6))
-    rowfilter_box.grid_columnconfigure(0, weight=1)
-
-    rowfilter_header = ttk.Frame(rowfilter_box, style="StormPanel.TFrame")
-    rowfilter_header.grid(row=0, column=0, sticky="ew")
-    rowfilter_header.grid_columnconfigure(1, weight=1)
+    ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(6, 0))
     ttk.Button(
-        rowfilter_header,
-        text="+",
-        width=4,
-        style="Add.TButton",
-        command=lambda: add_order_item("Row Filter"),
-    ).grid(row=0, column=0, sticky="w", padx=(0, 6))
-    rowfilter_toggle = ttk.Button(rowfilter_header, text="Row Filter v", style="NodeToggle.TButton")
-    rowfilter_toggle.grid(row=0, column=1, sticky="ew")
-    rowfilter_toggle.configure(command=lambda: toggle_settings(rowfilter_settings, rowfilter_toggle, "Row Filter"))
-
-    rowfilter_settings = ttk.Frame(rowfilter_box, padding=(24, 6, 0, 0), style="StormPanel.TFrame")
-    rowfilter_settings.grid(row=1, column=0, sticky="ew")
-    rowfilter_settings.grid_columnconfigure(0, weight=1)
-
-    ttk.Label(
-        rowfilter_settings,
-        text="Include: keep rows with value X. Exclude: remove rows with value X.",
-        style="Storm.TLabel",
-        wraplength=360,
-        justify="left"
-    ).grid(row=0, column=0, sticky="w", pady=(0, 6))
-
-    ttk.Label(rowfilter_settings, text="Mode", style="Storm.TLabel").grid(row=1, column=0, sticky="w")
-    row_filter_mode_combo = ttk.Combobox(
-        rowfilter_settings,
-        textvariable=row_filter_mode_var,
-        values=["include", "exclude"],
-        state="readonly",
-        width=14
-    )
-    row_filter_mode_combo.grid(row=2, column=0, sticky="w", pady=(2, 6))
-
-    ttk.Label(rowfilter_settings, text="Value", style="Storm.TLabel").grid(row=3, column=0, sticky="w")
-    row_filter_condition_entry = ttk.Entry(rowfilter_settings, textvariable=row_filter_condition_var)
-    row_filter_condition_entry.grid(row=4, column=0, sticky="ew", pady=(2, 0))
-    ttk.Label(
-        rowfilter_settings,
-        text="Example: UNKNOWN",
-        style="Storm.TLabel"
-    ).grid(row=5, column=0, sticky="w", pady=(4, 0))
+        filter_settings,
+        text="Reset",
+        style="Small.TButton",
+        command=lambda: reset_tuneables("Filter")
+    ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
     node_row += 1
 
@@ -2174,14 +2496,16 @@ def LaunchVisualizer():
     generate_header = ttk.Frame(generate_box, style="StormPanel.TFrame")
     generate_header.grid(row=0, column=0, sticky="ew")
     generate_header.grid_columnconfigure(1, weight=1)
-    ttk.Button(
+    generate_add_button = ttk.Button(
         generate_header,
         text="+",
         width=4,
         style="Add.TButton",
         command=lambda: add_order_item("Generate Column"),
-    ).grid(row=0, column=0, sticky="w", padx=(0, 6))
-    generate_toggle = ttk.Button(generate_header, text="Generate Column v", style="NodeToggle.TButton")
+    )
+    generate_add_button.grid(row=0, column=0, sticky="w", padx=(0, 6))
+    tunable_add_buttons["Generate Column"] = generate_add_button
+    generate_toggle = ttk.Button(generate_header, text=format_node_toggle_text("Generate Column", False), style="NodeToggle.TButton")
     generate_toggle.grid(row=0, column=1, sticky="ew")
     generate_toggle.configure(command=lambda: toggle_settings(generate_settings, generate_toggle, "Generate Column"))
 
@@ -2196,12 +2520,19 @@ def LaunchVisualizer():
         wraplength=360,
         justify="left"
     ).grid(row=0, column=0, sticky="w", pady=(0, 6))
+    ttk.Label(
+        generate_settings,
+        text="Example: unit_price, quantity with * creates unit_price * quantity",
+        style="Storm.TLabel",
+        wraplength=360,
+        justify="left"
+    ).grid(row=1, column=0, sticky="w", pady=(0, 6))
 
-    ttk.Label(generate_settings, text="New column name", style="Storm.TLabel").grid(row=1, column=0, sticky="w")
+    ttk.Label(generate_settings, text="New column name", style="Storm.TLabel").grid(row=2, column=0, sticky="w")
     generate_column_name_entry = ttk.Entry(generate_settings, textvariable=generate_column_name_var)
-    generate_column_name_entry.grid(row=2, column=0, sticky="ew", pady=(2, 6))
+    generate_column_name_entry.grid(row=3, column=0, sticky="ew", pady=(2, 6))
 
-    ttk.Label(generate_settings, text="Operator to apply", style="Storm.TLabel").grid(row=3, column=0, sticky="w")
+    ttk.Label(generate_settings, text="Operator to apply", style="Storm.TLabel").grid(row=4, column=0, sticky="w")
     generate_operator_combo = ttk.Combobox(
         generate_settings,
         textvariable=generate_operator_var,
@@ -2209,12 +2540,12 @@ def LaunchVisualizer():
         state="readonly",
         width=6
     )
-    generate_operator_combo.grid(row=4, column=0, sticky="w", pady=(2, 6))
+    generate_operator_combo.grid(row=5, column=0, sticky="w", pady=(2, 6))
 
-    ttk.Label(generate_settings, text="Existing columns to combine", style="Storm.TLabel").grid(row=5, column=0, sticky="w")
+    ttk.Label(generate_settings, text="Existing columns to combine", style="Storm.TLabel").grid(row=6, column=0, sticky="w")
 
     generate_rows_frame = ttk.Frame(generate_settings, style="StormPanel.TFrame")
-    generate_rows_frame.grid(row=6, column=0, sticky="ew")
+    generate_rows_frame.grid(row=7, column=0, sticky="ew")
     generate_rows_frame.grid_columnconfigure(0, weight=1)
 
     ttk.Button(
@@ -2222,13 +2553,13 @@ def LaunchVisualizer():
         text="+ Add Row",
         style="Small.TButton",
         command=add_generate_row
-    ).grid(row=7, column=0, sticky="w", pady=(6, 0))
-
-    ttk.Label(
+    ).grid(row=8, column=0, sticky="w", pady=(6, 0))
+    ttk.Button(
         generate_settings,
-        text="Example: unit_price, quantity with * creates unit_price * quantity",
-        style="Storm.TLabel"
-    ).grid(row=8, column=0, sticky="w", pady=(4, 0))
+        text="Reset",
+        style="Small.TButton",
+        command=lambda: reset_tuneables("Generate Column")
+    ).grid(row=9, column=0, sticky="w", pady=(6, 0))
 
     node_row += 1
 
@@ -2239,14 +2570,16 @@ def LaunchVisualizer():
     validate_header = ttk.Frame(validate_box, style="StormPanel.TFrame")
     validate_header.grid(row=0, column=0, sticky="ew")
     validate_header.grid_columnconfigure(1, weight=1)
-    ttk.Button(
+    validate_add_button = ttk.Button(
         validate_header,
         text="+",
         width=4,
         style="Add.TButton",
         command=lambda: add_order_item("Validate Required Columns"),
-    ).grid(row=0, column=0, sticky="w", padx=(0, 6))
-    validate_toggle = ttk.Button(validate_header, text="Validate Required Columns v", style="NodeToggle.TButton")
+    )
+    validate_add_button.grid(row=0, column=0, sticky="w", padx=(0, 6))
+    tunable_add_buttons["Validate Required Columns"] = validate_add_button
+    validate_toggle = ttk.Button(validate_header, text=format_node_toggle_text("Validate Required Columns", False), style="NodeToggle.TButton")
     validate_toggle.grid(row=0, column=1, sticky="ew")
     validate_toggle.configure(command=lambda: toggle_settings(validate_settings, validate_toggle, "Validate Required Columns"))
 
@@ -2275,24 +2608,31 @@ def LaunchVisualizer():
         command=add_validate_row
     ).grid(row=3, column=0, sticky="w", pady=(6, 0))
 
-    ttk.Label(
+    ttk.Button(
         validate_settings,
-        text="Example: customer_name",
-        style="Storm.TLabel"
-    ).grid(row=4, column=0, sticky="w", pady=(4, 0))
+        text="Reset",
+        style="Small.TButton",
+        command=lambda: reset_tuneables("Validate Required Columns")
+    ).grid(row=4, column=0, sticky="w", pady=(6, 0))
 
     node_row += 1
+
+    normalize_box.grid_configure(row=0)
+    replace_box.grid_configure(row=1)
+    filter_box.grid_configure(row=2)
+    generate_box.grid_configure(row=3)
+    dropdup_box.grid_configure(row=4)
+    validate_box.grid_remove()
 
     show_section(normalize_info, False)
     show_section(replace_settings, False)
     show_section(dropdup_info, False)
     show_section(filter_settings, False)
-    show_section(rowfilter_settings, False)
     show_section(generate_settings, False)
-    show_section(validate_settings, False)
 
     add_replace_row()
     add_filter_row()
+    on_filter_mode_changed()
     add_generate_row()
     add_generate_row()
     add_validate_row()
