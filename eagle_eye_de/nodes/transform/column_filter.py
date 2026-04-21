@@ -1,8 +1,10 @@
 class ColumnFilterNode:
     Name = "ColumnFilter"
 
-    def __init__(self, Columns, Mode: str = "include"):
-        self.Columns = list(Columns)
+    def __init__(self, Columns=None, Mode: str = "include", MatchValues=None, MatchHeaders: bool = True):
+        self.Columns = list(Columns or [])
+        self.MatchValues = list(MatchValues) if MatchValues is not None else None
+        self.MatchHeaders = MatchHeaders
         self.Mode = Mode.lower()
 
         if self.Mode not in ("include", "exclude"):
@@ -13,21 +15,43 @@ class ColumnFilterNode:
             raise ValueError("ColumnFilterNode received no input data.")
 
         if Ctx:
-            Ctx.Log("ColumnFilterStart", Columns=self.Columns, Mode=self.Mode)
+            Ctx.Log(
+                "ColumnFilterStart",
+                Columns=self.Columns,
+                MatchValues=self.MatchValues,
+                Mode=self.Mode
+            )
 
         Data = Data.copy()
 
-        MissingColumns = [Column for Column in self.Columns if Column not in Data.columns]
+        if self.MatchValues is not None:
+            Wanted = {str(Value).strip().lower() for Value in self.MatchValues}
+            MatchingColumns = []
 
-        if self.Mode == "include":
-            if MissingColumns:
-                raise ValueError(f"ColumnFilterNode missing columns: {MissingColumns}")
+            for Column in Data.columns:
+                Values = set(Data[Column].map(lambda Value: str(Value).strip().lower()).tolist())
+                if self.MatchHeaders:
+                    Values.add(str(Column).strip().lower())
 
-            Data = Data[self.Columns]
+                if Values.intersection(Wanted):
+                    MatchingColumns.append(Column)
 
-        elif self.Mode == "exclude":
-            ExistingColumns = [Column for Column in self.Columns if Column in Data.columns]
-            Data = Data.drop(columns=ExistingColumns)
+            if self.Mode == "include":
+                Data = Data[MatchingColumns]
+            else:
+                Data = Data.drop(columns=MatchingColumns)
+        else:
+            MissingColumns = [Column for Column in self.Columns if Column not in Data.columns]
+
+            if self.Mode == "include":
+                if MissingColumns:
+                    raise ValueError(f"ColumnFilterNode missing columns: {MissingColumns}")
+
+                Data = Data[self.Columns]
+
+            elif self.Mode == "exclude":
+                ExistingColumns = [Column for Column in self.Columns if Column in Data.columns]
+                Data = Data.drop(columns=ExistingColumns)
 
         if Ctx:
             Ctx.Log(
