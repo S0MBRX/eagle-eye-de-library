@@ -15,6 +15,12 @@ class NormalizeColumnsNode:
     def NormalizeText(Value):
         return str(Value).strip().lower().replace(" ", "_")
 
+    @staticmethod
+    def HasAutoNumberedColumns(Data):
+        Expected = list(range(1, len(Data.columns) + 1))
+        Columns = list(Data.columns)
+        return Columns == Expected or [str(Column) for Column in Columns] == [str(Column) for Column in Expected]
+
     def NormalizeValue(self, Value):
         if not isinstance(Value, str):
             return Value
@@ -32,6 +38,13 @@ class NormalizeColumnsNode:
 
         if self.Target == "headers":
             OriginalColumns = list(Data.columns)
+            PromotedFirstRow = False
+
+            if self.HasAutoNumberedColumns(Data) and len(Data) > 0:
+                OriginalColumns = Data.iloc[0].tolist()
+                Data = Data.iloc[1:].reset_index(drop=True)
+                Data.columns = OriginalColumns
+                PromotedFirstRow = True
 
             Data.columns = [
                 self.NormalizeText(Column)
@@ -41,6 +54,8 @@ class NormalizeColumnsNode:
             ChangedCount = sum(
                 1 for Old, New in zip(OriginalColumns, Data.columns) if str(Old) != str(New)
             )
+            if PromotedFirstRow:
+                ChangedCount += len(Data.columns)
         else:
             OriginalData = Data.copy()
             Data = Data.apply(lambda Column: Column.map(self.NormalizeValue))

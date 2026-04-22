@@ -6,6 +6,7 @@ def LaunchVisualizer():
     from tkinter import filedialog, messagebox, ttk
 
     from eagle_eye_de.nodes import (
+        ExtractCsvNode,
         NormalizeColumnsNode,
         ReplaceValuesNode,
         DropDuplicatesNode,
@@ -14,6 +15,7 @@ def LaunchVisualizer():
         TypeConsistencyNode,
         ValidateRequiredColumnsNode,
     )
+    from eagle_eye_de.nodes.extract.csv import ReadCsvRows
 
     root = tk.Tk()
     root.title("EagleEyeDE Visualizer")
@@ -166,11 +168,12 @@ def LaunchVisualizer():
     generate_var = tk.BooleanVar(value=False)
     validate_var = tk.BooleanVar(value=False)
 
-    normalize_target_var = tk.StringVar(value="column headers")
+    normalize_target_var = tk.StringVar(value="all values")
     type_outlier_action_var = tk.StringVar(value="highlight")
     filter_target_var = tk.StringVar(value="rows")
     filter_mode_var = tk.StringVar(value="include")
     filter_match_mode_var = tk.StringVar(value="or")
+    filter_match_by_var = tk.StringVar(value="values")
     filter_description_var = tk.StringVar(value="")
     generate_column_name_var = tk.StringVar(value="")
     generate_operator_var = tk.StringVar(value="+")
@@ -187,7 +190,7 @@ def LaunchVisualizer():
     tunable_nodes = {
         "Normalize",
         "Replace Values",
-        "Fix Data Types",
+        "Coerce Data Types",
         "Filter",
         "Generate Column",
         "Validate Required Columns",
@@ -300,11 +303,12 @@ def LaunchVisualizer():
             return normalize_target_label(meta.get("normalize_target", "headers"))
         if name == "Replace Values":
             return f"{len(meta.get('replace_map', {}))} pairs"
-        if name == "Fix Data Types":
+        if name == "Coerce Data Types":
             return f"{meta.get('outlier_action', 'highlight')} outliers"
         if name == "Filter":
             values = meta.get("filter_values", [])
-            return f"{meta.get('filter_mode', 'include')} {meta.get('filter_target', 'rows')} with {len(values)} values"
+            match_by = "index" if meta.get("filter_match_by", "values") == "index" else "values"
+            return f"{meta.get('filter_mode', 'include')} {meta.get('filter_target', 'rows')} by {match_by}: {len(values)}"
         if name == "Generate Column":
             sources = ", ".join(meta.get("source_columns", []))
             return f"{meta.get('new_column', '')} = {sources}"
@@ -320,13 +324,14 @@ def LaunchVisualizer():
             return [f"target: {normalize_target_label(meta.get('normalize_target', 'headers'))}"]
         if name == "Replace Values":
             return [f"{old} -> {new}" for old, new in meta.get("replace_map", {}).items()]
-        if name == "Fix Data Types":
+        if name == "Coerce Data Types":
             return [f"outliers: {meta.get('outlier_action', 'highlight')}"]
         if name == "Filter":
             values = meta.get("filter_values", [])
             return [
                 f"target: {meta.get('filter_target', 'rows')}",
                 f"mode: {meta.get('filter_mode', 'include')}",
+                f"match by: {meta.get('filter_match_by', 'values')}",
                 f"logic: {meta.get('filter_match_mode', 'or')}",
                 f"values: {', '.join(values)}",
             ]
@@ -345,7 +350,7 @@ def LaunchVisualizer():
             "Normalize",
             "Normalize Columns",
             "Replace Values",
-            "Fix Data Types",
+            "Coerce Data Types",
             "Filter",
             "Generate Column",
             "Validate Required Columns",
@@ -415,7 +420,7 @@ def LaunchVisualizer():
 
         if name == "Replace Values":
             return flash_row_widgets(replace_rows, "from_entry", "to_entry")
-        if name == "Fix Data Types":
+        if name == "Coerce Data Types":
             return False
         if name == "Filter":
             return flash_row_widgets(filter_rows, "entry")
@@ -482,7 +487,7 @@ def LaunchVisualizer():
 
             return save_replace_values
 
-        if name == "Fix Data Types":
+        if name == "Coerce Data Types":
             action_var = tk.StringVar(value=meta.get("outlier_action", "highlight"))
             ttk.Label(editor, text="outliers", style="Storm.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=1)
             ttk.Combobox(
@@ -505,16 +510,19 @@ def LaunchVisualizer():
             target_var = tk.StringVar(value=meta.get("filter_target", "rows"))
             mode_var = tk.StringVar(value=meta.get("filter_mode", "include"))
             match_var = tk.StringVar(value=meta.get("filter_match_mode", "or"))
+            match_by_var = tk.StringVar(value=meta.get("filter_match_by", "values"))
             values_var = tk.StringVar(value=", ".join(meta.get("filter_values", [])))
 
             ttk.Label(editor, text="target", style="Storm.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=1)
             ttk.Combobox(editor, textvariable=target_var, values=("rows", "columns"), state="readonly", width=10).grid(row=0, column=1, sticky="w", pady=1)
             ttk.Label(editor, text="mode", style="Storm.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 6), pady=1)
             ttk.Combobox(editor, textvariable=mode_var, values=("include", "exclude"), state="readonly", width=10).grid(row=1, column=1, sticky="w", pady=1)
-            ttk.Label(editor, text="logic", style="Storm.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 6), pady=1)
-            ttk.Combobox(editor, textvariable=match_var, values=("or", "and"), state="readonly", width=10).grid(row=2, column=1, sticky="w", pady=1)
-            ttk.Label(editor, text="values", style="Storm.TLabel").grid(row=3, column=0, sticky="w", padx=(0, 6), pady=1)
-            ttk.Entry(editor, textvariable=values_var, width=28).grid(row=3, column=1, columnspan=3, sticky="ew", pady=1)
+            ttk.Label(editor, text="match", style="Storm.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 6), pady=1)
+            ttk.Combobox(editor, textvariable=match_by_var, values=("values", "index"), state="readonly", width=10).grid(row=2, column=1, sticky="w", pady=1)
+            ttk.Label(editor, text="logic", style="Storm.TLabel").grid(row=3, column=0, sticky="w", padx=(0, 6), pady=1)
+            ttk.Combobox(editor, textvariable=match_var, values=("or", "and"), state="readonly", width=10).grid(row=3, column=1, sticky="w", pady=1)
+            ttk.Label(editor, text="values/indexes", style="Storm.TLabel").grid(row=4, column=0, sticky="w", padx=(0, 6), pady=1)
+            ttk.Entry(editor, textvariable=values_var, width=28).grid(row=4, column=1, columnspan=3, sticky="ew", pady=1)
 
             def save_filter():
                 values = split_entry_list(values_var.get())
@@ -528,6 +536,9 @@ def LaunchVisualizer():
                 mode = mode_var.get().strip().lower()
                 if mode not in ("include", "exclude"):
                     mode = "include"
+                match_by = match_by_var.get().strip().lower()
+                if match_by not in ("values", "index"):
+                    match_by = "values"
                 match_mode = match_var.get().strip().lower()
                 if match_mode not in ("and", "or"):
                     match_mode = "or"
@@ -537,6 +548,7 @@ def LaunchVisualizer():
                     {
                         "filter_target": target,
                         "filter_mode": mode,
+                        "filter_match_by": match_by,
                         "filter_match_mode": match_mode,
                         "filter_values": values,
                     }
@@ -759,7 +771,7 @@ def LaunchVisualizer():
             "Normalize": (lambda: normalize_info, lambda: normalize_toggle),
             "Normalize Columns": (lambda: normalize_info, lambda: normalize_toggle),
             "Replace Values": (lambda: replace_settings, lambda: replace_toggle),
-            "Fix Data Types": (lambda: type_settings, lambda: type_toggle),
+            "Coerce Data Types": (lambda: type_settings, lambda: type_toggle),
             "Drop Duplicates": (lambda: dropdup_info, lambda: dropdup_toggle),
             "Filter": (lambda: filter_settings, lambda: filter_toggle),
             "Generate Column": (lambda: generate_settings, lambda: generate_toggle),
@@ -782,16 +794,17 @@ def LaunchVisualizer():
 
     def tuneables_are_default(name):
         if name in ("Normalize", "Normalize Columns"):
-            return normalize_target_key(normalize_target_var.get()) == "headers"
+            return normalize_target_key(normalize_target_var.get()) == "values"
         if name == "Replace Values":
             return len(replace_rows) == 1 and replace_rows[0]["from_var"].get().strip() == "" and replace_rows[0]["to_var"].get().strip() == ""
-        if name == "Fix Data Types":
+        if name == "Coerce Data Types":
             return type_outlier_action_var.get() == "highlight"
         if name == "Filter":
             return (
                 filter_target_var.get() == "rows"
                 and filter_mode_var.get() == "include"
                 and filter_match_mode_var.get() == "or"
+                and filter_match_by_var.get() == "values"
                 and len(filter_rows) == 1
                 and row_values(filter_rows) == [""]
             )
@@ -851,16 +864,17 @@ def LaunchVisualizer():
         initializing_tunables = True
         try:
             if name in ("Normalize", "Normalize Columns"):
-                normalize_target_var.set("column headers")
+                normalize_target_var.set("all values")
             elif name == "Replace Values":
                 replace_rows.clear()
                 add_replace_row()
-            elif name == "Fix Data Types":
+            elif name == "Coerce Data Types":
                 type_outlier_action_var.set("highlight")
             elif name == "Filter":
                 filter_target_var.set("rows")
                 filter_mode_var.set("include")
                 filter_match_mode_var.set("or")
+                filter_match_by_var.set("values")
                 filter_rows.clear()
                 add_filter_row()
                 on_filter_mode_changed()
@@ -882,10 +896,11 @@ def LaunchVisualizer():
         refresh_tunable_add_state(name)
 
     normalize_target_var.trace_add("write", lambda *args: mark_tuneables_changed("Normalize"))
-    type_outlier_action_var.trace_add("write", lambda *args: mark_tuneables_changed("Fix Data Types"))
+    type_outlier_action_var.trace_add("write", lambda *args: mark_tuneables_changed("Coerce Data Types"))
     filter_target_var.trace_add("write", lambda *args: mark_tuneables_changed("Filter"))
     filter_mode_var.trace_add("write", lambda *args: mark_tuneables_changed("Filter"))
     filter_match_mode_var.trace_add("write", lambda *args: mark_tuneables_changed("Filter"))
+    filter_match_by_var.trace_add("write", lambda *args: mark_tuneables_changed("Filter"))
     generate_column_name_var.trace_add("write", lambda *args: mark_tuneables_changed("Generate Column"))
     generate_operator_var.trace_add("write", lambda *args: mark_tuneables_changed("Generate Column"))
 
@@ -1050,7 +1065,7 @@ def LaunchVisualizer():
             )
 
         columns = list(display_df.columns)
-        table_state["column_count"] = len(columns)
+        table_state["column_count"] = len(columns) + 1
 
         canvas.update_idletasks()
         available_width = canvas.winfo_width()
@@ -1080,11 +1095,14 @@ def LaunchVisualizer():
                 min(max_column_width_px, desired_width_px)
             )
 
-        table_width_px = max(1, sum(column_widths_px.values()))
+        index_column_width_px = 46
+        table_width_px = max(1, index_column_width_px + sum(column_widths_px.values()))
         table_state["last_canvas_width"] = available_width
         table_state["table_width_px"] = table_width_px
         canvas.itemconfigure(table_state["window_id"], width=table_width_px)
 
+        index_bg = "#e9f1ff"
+        index_border = "#2f64c8"
         header_bg = "#d7e3f0"
         default_bg = "white"
         added_bg = "#d9f5d9"
@@ -1154,44 +1172,104 @@ def LaunchVisualizer():
                 line_count += max(1, int((len(line) + chars_per_line - 1) / chars_per_line))
             return max(1, min(5, line_count))
 
-        for col_index, column_name in enumerate(columns):
-            current_column_width_px = column_widths_px[column_name]
-            header_color = header_bg
-            if cell_colors is not None and (-1, column_name) in cell_colors:
-                if cell_colors[(-1, column_name)] == "added":
-                    header_color = added_bg
-                elif cell_colors[(-1, column_name)] == "modified":
-                    header_color = modified_bg
-                elif cell_colors[(-1, column_name)] == "deleted":
-                    header_color = deleted_bg
+        def is_auto_numbered_columns(column_names):
+            expected = list(range(1, len(column_names) + 1))
+            return list(column_names) == expected or [str(column) for column in column_names] == [str(column) for column in expected]
 
-            header = tk.Text(
+        show_dataframe_headers = not is_auto_numbered_columns(columns)
+        first_data_grid_row = 2 if show_dataframe_headers else 1
+
+        corner = tk.Label(
+            inner,
+            text="#",
+            bg=index_bg,
+            fg="#163a7a",
+            relief="solid",
+            bd=1,
+            highlightbackground=index_border,
+            highlightcolor=index_border,
+            highlightthickness=1,
+            padx=6,
+            pady=4,
+            font=("Arial", 9, "bold"),
+        )
+        corner.grid(row=0, column=0, rowspan=first_data_grid_row, sticky="nsew")
+        inner.grid_columnconfigure(0, weight=0, minsize=index_column_width_px)
+
+        for col_index, column_name in enumerate(columns):
+            indexed_col = col_index + 1
+            current_column_width_px = column_widths_px[column_name]
+            column_index = tk.Label(
                 inner,
-                bg=header_color,
-                fg="black",
+                text=str(indexed_col),
+                bg=index_bg,
+                fg="#163a7a",
                 relief="solid",
                 bd=1,
+                highlightbackground=index_border,
+                highlightcolor=index_border,
+                highlightthickness=1,
+                padx=6,
+                pady=3,
+                font=("Arial", 9, "bold"),
+            )
+            column_index.grid(row=0, column=indexed_col, sticky="nsew")
+
+            inner.grid_columnconfigure(indexed_col, weight=0, minsize=current_column_width_px)
+
+            if show_dataframe_headers:
+                header_color = header_bg
+                if cell_colors is not None and (-1, column_name) in cell_colors:
+                    if cell_colors[(-1, column_name)] == "added":
+                        header_color = added_bg
+                    elif cell_colors[(-1, column_name)] == "modified":
+                        header_color = modified_bg
+                    elif cell_colors[(-1, column_name)] == "deleted":
+                        header_color = deleted_bg
+
+                header = tk.Text(
+                    inner,
+                    bg=header_color,
+                    fg="black",
+                    relief="solid",
+                    bd=1,
+                    padx=6,
+                    pady=4,
+                    font=("Arial", 9, "bold"),
+                    width=1,
+                    height=1,
+                    wrap="word",
+                    cursor="xterm",
+                    takefocus=True,
+                )
+                header.insert("1.0", str(column_name))
+                make_read_only_text(header)
+                header.grid(row=1, column=indexed_col, sticky="nsew")
+
+                if hover_old_values is not None and (-1, column_name) in hover_old_values:
+                    old_value = hover_old_values[(-1, column_name)]
+                    tip_text = f"Previous header: {old_value}"
+                    header.bind("<Enter>", lambda event, widget=header, text=tip_text: show_tooltip(widget, text))
+                    header.bind("<Leave>", lambda event: hide_tooltip())
+
+        for row_index, (_, row) in enumerate(display_df.iterrows(), start=1):
+            table_row = row_index + first_data_grid_row - 1
+            row_index_label = tk.Label(
+                inner,
+                text=str(row_index),
+                bg=index_bg,
+                fg="#163a7a",
+                relief="solid",
+                bd=1,
+                highlightbackground=index_border,
+                highlightcolor=index_border,
+                highlightthickness=1,
                 padx=6,
                 pady=4,
                 font=("Arial", 9, "bold"),
-                width=1,
-                height=1,
-                wrap="word",
-                cursor="xterm",
-                takefocus=True,
             )
-            header.insert("1.0", str(column_name))
-            make_read_only_text(header)
-            header.grid(row=0, column=col_index, sticky="nsew")
-            inner.grid_columnconfigure(col_index, weight=0, minsize=current_column_width_px)
+            row_index_label.grid(row=table_row, column=0, sticky="nsew")
 
-            if hover_old_values is not None and (-1, column_name) in hover_old_values:
-                old_value = hover_old_values[(-1, column_name)]
-                tip_text = f"Previous header: {old_value}"
-                header.bind("<Enter>", lambda event, widget=header, text=tip_text: show_tooltip(widget, text))
-                header.bind("<Leave>", lambda event: hide_tooltip())
-
-        for row_index, (_, row) in enumerate(display_df.iterrows(), start=1):
             for col_index, column_name in enumerate(columns):
                 current_column_width_px = column_widths_px[column_name]
                 cell_value = row[column_name]
@@ -1226,7 +1304,7 @@ def LaunchVisualizer():
                 )
                 cell.insert("1.0", cell_value)
                 make_read_only_text(cell)
-                cell.grid(row=row_index, column=col_index, sticky="nsew")
+                cell.grid(row=table_row, column=col_index + 1, sticky="nsew")
 
                 hover_key = (row_index - 1, column_name)
                 if hover_old_values is not None and hover_key in hover_old_values:
@@ -1284,7 +1362,13 @@ def LaunchVisualizer():
             return
 
         try:
-            processed_steps[-1]["data"].to_csv(save_path, index=False)
+            output_data = processed_steps[-1]["data"]
+            expected_columns = list(range(1, len(output_data.columns) + 1))
+            has_auto_columns = (
+                list(output_data.columns) == expected_columns
+                or [str(column) for column in output_data.columns] == [str(column) for column in expected_columns]
+            )
+            output_data.to_csv(save_path, index=False, header=not has_auto_columns)
             if processed_window is not None and processed_window.winfo_exists():
                 processed_window.title(os.path.basename(save_path))
         except Exception as error:
@@ -1397,7 +1481,7 @@ def LaunchVisualizer():
         if not input_path:
             return None
 
-        return pd.read_csv(input_path).head(50)
+        return ReadCsvRows(input_path).head(50)
 
     def build_operation_snapshot(name):
         if name in ("Normalize", "Normalize Columns"):
@@ -1420,7 +1504,7 @@ def LaunchVisualizer():
                 },
             }
 
-        if name == "Fix Data Types":
+        if name == "Coerce Data Types":
             action = type_outlier_action_var.get().strip().lower()
             if action not in ("highlight", "delete"):
                 action = "highlight"
@@ -1448,6 +1532,9 @@ def LaunchVisualizer():
             mode = filter_mode_var.get().strip().lower()
             if mode not in ("include", "exclude"):
                 mode = "include"
+            match_by = filter_match_by_var.get().strip().lower()
+            if match_by not in ("values", "index"):
+                match_by = "values"
             match_mode = filter_match_mode_var.get().strip().lower()
             if match_mode not in ("and", "or"):
                 match_mode = "or"
@@ -1457,6 +1544,7 @@ def LaunchVisualizer():
                 "meta": {
                     "filter_target": target,
                     "filter_mode": mode,
+                    "filter_match_by": match_by,
                     "filter_match_mode": match_mode,
                     "filter_values": list(filter_values),
                 },
@@ -1503,7 +1591,7 @@ def LaunchVisualizer():
             node = NormalizeColumnsNode(Target=meta.get("normalize_target", "headers"))
         elif name == "Replace Values":
             node = ReplaceValuesNode(meta["replace_map"])
-        elif name == "Fix Data Types":
+        elif name == "Coerce Data Types":
             node = TypeConsistencyNode(OutlierAction=meta.get("outlier_action", "highlight"))
         elif name == "Drop Duplicates":
             node = DropDuplicatesNode()
@@ -1513,6 +1601,7 @@ def LaunchVisualizer():
                 Mode=meta["filter_mode"],
                 MatchMode=meta.get("filter_match_mode", "or"),
                 MatchValues=meta.get("filter_values", []),
+                MatchBy=meta.get("filter_match_by", "values"),
             )
         elif name == "Generate Column":
             node = GenerateColumnNode(meta["new_column"], meta["operator"], meta["source_columns"])
@@ -1561,6 +1650,11 @@ def LaunchVisualizer():
             "outlier_values": [],
         }
 
+        def has_auto_numbered_columns(df):
+            expected = list(range(1, len(df.columns) + 1))
+            columns = list(df.columns)
+            return columns == expected or [str(column) for column in columns] == [str(column) for column in expected]
+
         if step_name in ("Normalize", "Normalize Columns"):
             target = normalize_target_key(meta.get("normalize_target", "headers"))
             if target == "values":
@@ -1572,6 +1666,15 @@ def LaunchVisualizer():
                         if not values_equal(old_value, new_value):
                             diff["modified_cells"].add((row_index, col))
                             diff["modified_old_values"][(row_index, col)] = old_value
+                return diff
+
+            if has_auto_numbered_columns(prev) and len(prev) > 0:
+                diff["deleted_rows"].add(0)
+                for col_index, curr_col in enumerate(curr_columns):
+                    if col_index < len(prev_columns):
+                        old_value = prev.iloc[0, col_index]
+                        diff["modified_header_columns"].add(curr_col)
+                        diff["modified_old_values"][(-1, curr_col)] = str(old_value)
                 return diff
 
             for col_index, prev_col in enumerate(prev_columns):
@@ -1629,7 +1732,7 @@ def LaunchVisualizer():
 
             return diff
 
-        if step_name == "Fix Data Types":
+        if step_name == "Coerce Data Types":
             report = meta.get("type_report", {})
             current_index_positions = {
                 row_label: row_position
@@ -1672,7 +1775,32 @@ def LaunchVisualizer():
             target = meta.get("filter_target", "rows")
             mode = meta.get("filter_mode", "include")
             match_mode = meta.get("filter_match_mode", "or")
-            filter_values = {str(value).strip().lower() for value in meta.get("filter_values", meta.get("filter_columns", []))}
+            match_by = meta.get("filter_match_by", "values")
+            raw_filter_values = meta.get("filter_values", meta.get("filter_columns", []))
+            filter_values = {str(value).strip().lower() for value in raw_filter_values}
+
+            def parse_index_values(count):
+                positions = set()
+                for value in raw_filter_values:
+                    text = str(value).strip().replace(":", "-")
+                    parts = [part.strip() for part in text.split("-") if part.strip()]
+                    try:
+                        if len(parts) == 1:
+                            index = int(parts[0])
+                            if 1 <= index <= count:
+                                positions.add(index - 1)
+                        elif len(parts) == 2:
+                            start = int(parts[0])
+                            end = int(parts[1])
+                            if end < start:
+                                start, end = end, start
+                            start = max(1, start)
+                            end = min(count, end)
+                            for index in range(start, end + 1):
+                                positions.add(index - 1)
+                    except ValueError:
+                        continue
+                return positions
 
             def value_matches(existing_value, wanted_value):
                 existing_parsed = parse_literal_value(str(existing_value))
@@ -1683,8 +1811,8 @@ def LaunchVisualizer():
                 except Exception:
                     pass
 
-                existing_text = str(existing_value).strip().lower()
-                wanted_text = str(wanted_value).strip().lower()
+                existing_text = str(existing_value).strip().lower().replace(" ", "_")
+                wanted_text = str(wanted_value).strip().lower().replace(" ", "_")
                 return wanted_text != "" and wanted_text in existing_text
 
             def values_match(values):
@@ -1699,11 +1827,32 @@ def LaunchVisualizer():
                     for wanted_value in filter_values
                 )
 
-            if target == "columns":
+            if match_by == "index" and target == "columns":
+                matching_positions = parse_index_values(len(prev_columns))
+                matching_columns = [
+                    column_name
+                    for position, column_name in enumerate(prev_columns)
+                    if position in matching_positions
+                ]
+                if mode == "include":
+                    diff["deleted_columns"] = [col for col in prev_columns if col not in matching_columns]
+                else:
+                    diff["deleted_columns"] = matching_columns
+            elif match_by == "index":
+                matching_positions = parse_index_values(len(previous_df))
+                if mode == "include":
+                    diff["deleted_rows"] = [
+                        row_index
+                        for row_index in range(len(previous_df))
+                        if row_index not in matching_positions
+                    ]
+                else:
+                    diff["deleted_rows"] = sorted(matching_positions)
+            elif target == "columns":
                 matching_columns = [
                     column_name
                     for column_name in prev_columns
-                    if values_match(prev[column_name].tolist())
+                    if values_match([column_name])
                 ]
                 if mode == "include":
                     diff["deleted_columns"] = [col for col in prev_columns if col not in matching_columns]
@@ -1941,11 +2090,15 @@ def LaunchVisualizer():
         target = filter_target_var.get().strip().lower()
         mode = filter_mode_var.get().strip().lower()
         match_mode = filter_match_mode_var.get().strip().lower()
+        match_by = filter_match_by_var.get().strip().lower()
 
         subject = "rows" if target == "rows" else "columns"
         action = "keep" if mode == "include" else "remove"
         joiner = "all listed values" if match_mode == "and" else "any listed value"
-        filter_description_var.set(f"{mode}: {action} {subject} with {joiner}.")
+        if match_by == "index":
+            filter_description_var.set(f"{mode}: {action} {subject} by 1-based index. Use 3 or 3-8.")
+        else:
+            filter_description_var.set(f"{mode}: {action} {subject} with {joiner}.")
 
     def refresh_replace_rows():
         for child in replace_rows_frame.winfo_children():
@@ -2174,7 +2327,7 @@ def LaunchVisualizer():
                 messagebox.showerror("Missing Input", "Please choose an input CSV file.")
                 return
 
-            Data = pd.read_csv(input_path)
+            Data = ReadCsvRows(input_path)
             start_data = Data.copy()
             pipeline_started_at = time.perf_counter()
 
@@ -2201,7 +2354,7 @@ def LaunchVisualizer():
                 started_at = time.perf_counter()
                 Data = node.Run(Data)
                 duration_seconds = time.perf_counter() - started_at
-                if step_name == "Fix Data Types":
+                if step_name == "Coerce Data Types":
                     meta = dict(meta)
                     meta["type_report"] = getattr(node, "Report", {})
 
@@ -2214,7 +2367,7 @@ def LaunchVisualizer():
                     )
 
                 cell_colors = build_final_step_cell_colors(current_df, diff, max_rows=100)
-                if step_name == "Fix Data Types":
+                if step_name == "Coerce Data Types":
                     diagnostics = build_type_consistency_diagnostics(
                         previous_df,
                         current_df,
@@ -2387,7 +2540,7 @@ def LaunchVisualizer():
     normalize_header.grid_columnconfigure(1, weight=1)
     normalize_add_button = ttk.Button(
         normalize_header,
-        text="+add",
+        text="+ add",
         width=5,
         style="Add.TButton",
         command=lambda: add_order_item("Normalize")
@@ -2440,7 +2593,7 @@ def LaunchVisualizer():
     replace_header.grid_columnconfigure(1, weight=1)
     replace_add_button = ttk.Button(
         replace_header,
-        text="+add",
+        text="+ add",
         width=5,
         style="Add.TButton",
         command=lambda: add_order_item("Replace Values"),
@@ -2506,26 +2659,26 @@ def LaunchVisualizer():
     type_header.grid_columnconfigure(1, weight=1)
     type_add_button = ttk.Button(
         type_header,
-        text="+add",
+        text="+ add",
         width=5,
         style="Add.TButton",
-        command=lambda: add_order_item("Fix Data Types"),
+        command=lambda: add_order_item("Coerce Data Types"),
     )
     type_add_button.grid(row=0, column=0, sticky="w", padx=(0, 6))
-    tunable_add_buttons["Fix Data Types"] = type_add_button
-    type_toggle = ttk.Button(type_header, text=format_node_toggle_text("Fix Data Types", False), style="NodeToggle.TButton")
+    tunable_add_buttons["Coerce Data Types"] = type_add_button
+    type_toggle = ttk.Button(type_header, text=format_node_toggle_text("Coerce Data Types", False), style="NodeToggle.TButton")
     type_toggle.grid(row=0, column=1, sticky="ew")
-    type_toggle.configure(command=lambda: toggle_settings(type_settings, type_toggle, "Fix Data Types"))
+    type_toggle.configure(command=lambda: toggle_settings(type_settings, type_toggle, "Coerce Data Types"))
     type_reset_button = ttk.Button(
         type_header,
         text="\u21b6",
         width=3,
         style="Small.TButton",
-        command=lambda: reset_tuneables("Fix Data Types")
+        command=lambda: reset_tuneables("Coerce Data Types")
     )
     type_reset_button.grid(row=0, column=2, sticky="e", padx=(6, 0))
     type_reset_button.grid_remove()
-    tunable_reset_buttons["Fix Data Types"] = type_reset_button
+    tunable_reset_buttons["Coerce Data Types"] = type_reset_button
 
     type_settings = ttk.Frame(type_box, padding=(24, 6, 0, 0), style="StormPanel.TFrame")
     type_settings.grid(row=1, column=0, sticky="ew")
@@ -2559,7 +2712,7 @@ def LaunchVisualizer():
     dropdup_header.grid_columnconfigure(1, weight=1)
     ttk.Button(
         dropdup_header,
-        text="+add",
+        text="+ add",
         width=5,
         style="Add.TButton",
         command=lambda: add_order_item("Drop Duplicates")
@@ -2589,7 +2742,7 @@ def LaunchVisualizer():
     filter_header.grid_columnconfigure(1, weight=1)
     filter_add_button = ttk.Button(
         filter_header,
-        text="+add",
+        text="+ add",
         width=5,
         style="Add.TButton",
         command=lambda: add_order_item("Filter"),
@@ -2647,7 +2800,19 @@ def LaunchVisualizer():
     filter_mode_combo.grid(row=2, column=1, sticky="e", pady=(0, 6))
     filter_mode_combo.bind("<<ComboboxSelected>>", on_filter_mode_changed)
 
-    ttk.Label(filter_settings, text="Logic", style="Storm.TLabel").grid(row=3, column=0, sticky="w", padx=(0, 8), pady=(0, 6))
+    ttk.Label(filter_settings, text="Match", style="Storm.TLabel").grid(row=3, column=0, sticky="w", padx=(0, 8), pady=(0, 6))
+
+    filter_match_by_combo = ttk.Combobox(
+        filter_settings,
+        textvariable=filter_match_by_var,
+        values=["values", "index"],
+        state="readonly",
+        width=14
+    )
+    filter_match_by_combo.grid(row=3, column=1, sticky="e", pady=(0, 6))
+    filter_match_by_combo.bind("<<ComboboxSelected>>", on_filter_mode_changed)
+
+    ttk.Label(filter_settings, text="Logic", style="Storm.TLabel").grid(row=4, column=0, sticky="w", padx=(0, 8), pady=(0, 6))
 
     filter_match_combo = ttk.Combobox(
         filter_settings,
@@ -2656,13 +2821,13 @@ def LaunchVisualizer():
         state="readonly",
         width=14
     )
-    filter_match_combo.grid(row=3, column=1, sticky="e", pady=(0, 6))
+    filter_match_combo.grid(row=4, column=1, sticky="e", pady=(0, 6))
     filter_match_combo.bind("<<ComboboxSelected>>", on_filter_mode_changed)
 
-    ttk.Label(filter_settings, text="Values", style="Storm.TLabel").grid(row=4, column=0, columnspan=2, sticky="w")
+    ttk.Label(filter_settings, text="Values / indexes", style="Storm.TLabel").grid(row=5, column=0, columnspan=2, sticky="w")
 
     filter_rows_frame = ttk.Frame(filter_settings, style="StormPanel.TFrame")
-    filter_rows_frame.grid(row=5, column=0, columnspan=2, sticky="ew")
+    filter_rows_frame.grid(row=6, column=0, columnspan=2, sticky="ew")
     filter_rows_frame.grid_columnconfigure(0, weight=1)
 
     ttk.Button(
@@ -2670,7 +2835,7 @@ def LaunchVisualizer():
         text="+ Add Row",
         style="Small.TButton",
         command=add_filter_row
-    ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(6, 0))
+    ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
     node_row += 1
 
@@ -2683,7 +2848,7 @@ def LaunchVisualizer():
     generate_header.grid_columnconfigure(1, weight=1)
     generate_add_button = ttk.Button(
         generate_header,
-        text="+add",
+        text="+ add",
         width=5,
         style="Add.TButton",
         command=lambda: add_order_item("Generate Column"),
@@ -2761,7 +2926,7 @@ def LaunchVisualizer():
     validate_header.grid_columnconfigure(1, weight=1)
     validate_add_button = ttk.Button(
         validate_header,
-        text="+add",
+        text="+ add",
         width=5,
         style="Add.TButton",
         command=lambda: add_order_item("Validate Required Columns"),
@@ -2810,9 +2975,9 @@ def LaunchVisualizer():
     node_row += 1
 
     normalize_box.grid_configure(row=0)
-    replace_box.grid_configure(row=1)
-    type_box.grid_configure(row=2)
-    filter_box.grid_configure(row=3)
+    type_box.grid_configure(row=1)
+    filter_box.grid_configure(row=2)
+    replace_box.grid_configure(row=3)
     generate_box.grid_configure(row=4)
     dropdup_box.grid_configure(row=5)
     validate_box.grid_remove()
