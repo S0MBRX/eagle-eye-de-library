@@ -168,7 +168,7 @@ def LaunchVisualizer():
     generate_var = tk.BooleanVar(value=False)
     validate_var = tk.BooleanVar(value=False)
 
-    normalize_target_var = tk.StringVar(value="all values")
+    normalize_target_var = tk.StringVar(value="all cells")
     type_outlier_action_var = tk.StringVar(value="highlight")
     filter_target_var = tk.StringVar(value="rows")
     filter_mode_var = tk.StringVar(value="include")
@@ -286,13 +286,13 @@ def LaunchVisualizer():
 
     def normalize_target_key(target):
         target = str(target).strip().lower()
-        if target in ("all values", "values", "cells"):
+        if target in ("all values", "all cells", "values", "cells"):
             return "values"
         return "headers"
 
     def normalize_target_label(target):
         if normalize_target_key(target) == "values":
-            return "all values"
+            return "all cells"
         return "column headers"
 
     def get_operation_summary(operation):
@@ -448,7 +448,7 @@ def LaunchVisualizer():
             ttk.Combobox(
                 editor,
                 textvariable=target_var,
-                values=("column headers", "all values"),
+                values=("column headers", "all cells"),
                 state="readonly",
                 width=15
             ).grid(row=0, column=1, sticky="w", pady=1)
@@ -864,7 +864,7 @@ def LaunchVisualizer():
         initializing_tunables = True
         try:
             if name in ("Normalize", "Normalize Columns"):
-                normalize_target_var.set("all values")
+                normalize_target_var.set("all cells")
             elif name == "Replace Values":
                 replace_rows.clear()
                 add_replace_row()
@@ -2577,7 +2577,7 @@ def LaunchVisualizer():
     ttk.Combobox(
         normalize_info,
         textvariable=normalize_target_var,
-        values=["column headers", "all values"],
+        values=["column headers", "all cells"],
         state="readonly",
         width=16
     ).grid(row=1, column=1, sticky="w")
