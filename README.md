@@ -1,32 +1,42 @@
 # EagleEyeDE
 
-EagleEyeDE is a lightweight Python data engineering framework for building CSV cleaning pipelines from reusable nodes.
+EagleEyeDE is a Python data engineering framework for building CSV cleaning pipelines from reusable nodes.
 
 <strong><span style="color: purple;">API HERE</span></strong> - TestPyPI project page: https://test.pypi.org/project/eagle-eye-de/
 
-It is designed for small to medium local ETL workflows where a full orchestration platform would be too heavy, but plain scripts would become difficult to maintain.
+It is useful when you want a clear pipeline structure instead of one long cleaning script. You can use it through normal Python code, or launch the visualiser and build a pipeline interactively.
 
-## Features
+## Quick Start: Visualiser
 
-- Build data cleaning pipelines in Python code.
-- Run reusable extract, transform, and load nodes.
-- Add custom nodes for project-specific logic.
-- View execution reports with node timings and errors.
-- Launch a Tkinter visualiser for interactive pipeline building.
-- Inspect raw CSV input and processed output stages.
-- Extract tables from messy CSV files containing metadata or multiple tables.
+The fastest way to try EagleEyeDE is to launch the visualiser:
+
+```python
+from eagle_eye_de import LaunchVisualizer
+
+LaunchVisualizer()
+```
+
+This opens the UI, where you can:
+
+- select a CSV file;
+- preview the raw input;
+- add cleaning nodes to the run order;
+- configure node settings;
+- run the pipeline;
+- step through each processed stage;
+- save the final cleaned CSV.
 
 ## Installation
 
-Install from PyPI or TestPyPI:
+Install the package with pip:
 
 ```bash
 pip install eagle-eye-de
 ```
 
-## Quick Start
+## Quick Start: Code Pipeline
 
-Create a pipeline, add nodes, and run it:
+Pipelines can also be created directly in Python. A pipeline is just a sequence of nodes. Each node receives the current table, changes it, and passes it to the next node.
 
 ```python
 from eagle_eye_de import FormatRunReportForConsole, Pipeline
@@ -55,9 +65,9 @@ report = pipeline.Run()
 print(FormatRunReportForConsole(report))
 ```
 
-## Using the Visualiser
+## Recommended Use
 
-The visualiser can be launched from Python:
+For exploring a new messy CSV, start with the visualiser:
 
 ```python
 from eagle_eye_de import LaunchVisualizer
@@ -65,55 +75,338 @@ from eagle_eye_de import LaunchVisualizer
 LaunchVisualizer()
 ```
 
-The visualiser lets you:
-
-- select an input CSV file;
-- preview the raw table;
-- add nodes to a run order;
-- configure node settings;
-- run the pipeline;
-- step through each processed stage;
-- save the final processed CSV manually.
-
-## Built-In Nodes
-
-EagleEyeDE includes nodes for common CSV data cleaning tasks:
-
-| Node | Purpose |
-| --- | --- |
-| `ExtractCsvNode` | Loads CSV data into a pipeline. |
-| `ExtractTableNode` | Extracts one detected table from a messy multi-table CSV. |
-| `NormalizeColumnsNode` | Normalises headers or cell values. |
-| `ReplaceValuesNode` | Replaces matching values across the dataset. |
-| `FilterNode` | Includes or excludes rows or columns by values or indexes. |
-| `GenerateColumnNode` | Creates a new column from existing columns. |
-| `TypeConsistencyNode` | Detects dominant data types and handles outliers. |
-| `DropDuplicatesNode` | Removes duplicate rows. |
-| `WriteCsvNode` | Writes processed data to a CSV file. |
-
-## Extracting Tables From a Messy CSV
-
-Some CSV files contain metadata, blank rows, or several tables in one file. `ExtractTableNode` can extract one detected table by number:
+For repeatable workflows, write the pipeline in code:
 
 ```python
-from eagle_eye_de import Pipeline
-from eagle_eye_de.nodes import ExtractCsvNode, ExtractTableNode, NormalizeColumnsNode, WriteCsvNode
-
-pipeline = Pipeline("Extract Table Example")
-
-pipeline.Add(ExtractCsvNode("multi_table_report.csv"))
-pipeline.Add(ExtractTableNode(Table="1"))
+pipeline = Pipeline("Repeatable Cleaning Pipeline")
+pipeline.Add(ExtractCsvNode("input.csv"))
 pipeline.Add(NormalizeColumnsNode(Target="headers"))
-pipeline.Add(WriteCsvNode("table_1_cleaned.csv"))
-
+pipeline.Add(WriteCsvNode("output.csv"))
 pipeline.Run()
 ```
 
-Use `Table="2"` or `Table="3"` to extract later detected tables.
+The visualiser is best for seeing what each node does. Code pipelines are best when you know the steps and want to run them again.
+
+## How Pipelines Work
+
+EagleEyeDE uses a simple node pipeline:
+
+```text
+CSV input -> Node 1 -> Node 2 -> Node 3 -> CSV output
+```
+
+Each node should do one job. For example:
+
+```python
+pipeline.Add(ExtractCsvNode("input.csv"))
+pipeline.Add(NormalizeColumnsNode(Target="headers"))
+pipeline.Add(TypeConsistencyNode(OutlierAction="highlight"))
+pipeline.Add(WriteCsvNode("output.csv"))
+```
+
+The output of each node becomes the input for the next node.
+
+## Built-In Nodes
+
+The main built-in nodes are:
+
+- `ExtractCsvNode`
+- `ExtractTableNode`
+- `NormalizeColumnsNode`
+- `ReplaceValuesNode`
+- `FilterNode`
+- `GenerateColumnNode`
+- `TypeConsistencyNode`
+- `DropDuplicatesNode`
+- `WriteCsvNode`
+
+## ExtractCsvNode
+
+Loads a CSV file into the pipeline.
+
+### How it works
+
+`ExtractCsvNode` reads a CSV file and returns a Pandas dataframe. By default, it loads the file as raw rows, which helps with messy CSV files that may contain metadata, blank rows, or multiple tables.
+
+### Recommended use
+
+Use this as the first node in most pipelines.
+
+### Example
+
+```python
+from eagle_eye_de.nodes import ExtractCsvNode
+
+pipeline.Add(ExtractCsvNode("shoppers_dirty.csv"))
+```
+
+You can also load a detected table directly:
+
+```python
+pipeline.Add(ExtractCsvNode("multi_table_report.csv", Table="1"))
+```
+
+## ExtractTableNode
+
+Extracts one detected table from a messy CSV that has already been loaded.
+
+### How it works
+
+Some CSV files contain report titles, metadata rows, blank spacing, and several tables in the same file. `ExtractTableNode` scans the raw rows and extracts the selected table number.
+
+### Recommended use
+
+Use this after `ExtractCsvNode` when the input CSV contains more than one table or has metadata before the real table.
+
+### Example
+
+```python
+from eagle_eye_de.nodes import ExtractCsvNode, ExtractTableNode
+
+pipeline.Add(ExtractCsvNode("multi_table_report.csv"))
+pipeline.Add(ExtractTableNode(Table="1"))
+```
+
+To extract later tables:
+
+```python
+pipeline.Add(ExtractTableNode(Table="2"))
+pipeline.Add(ExtractTableNode(Table="3"))
+```
+
+## NormalizeColumnsNode
+
+Normalises either column headers or all cell values.
+
+### How it works
+
+The node trims whitespace, lowercases text, and replaces spaces with underscores. It can target column headers or cell values.
+
+### Recommended use
+
+Use `Target="headers"` near the start of a pipeline so later nodes can work with cleaner column names. Use `Target="values"` when the table contains inconsistent text values.
+
+### Examples
+
+Normalise headers:
+
+```python
+from eagle_eye_de.nodes import NormalizeColumnsNode
+
+pipeline.Add(NormalizeColumnsNode(Target="headers"))
+```
+
+Normalise all cell values:
+
+```python
+pipeline.Add(NormalizeColumnsNode(Target="values"))
+```
+
+Example header changes:
+
+```text
+Customer Name -> customer_name
+Email Address -> email_address
+Total Spent ($) -> total_spent_($)
+```
+
+## ReplaceValuesNode
+
+Replaces matching values across the dataframe.
+
+### How it works
+
+`ReplaceValuesNode` accepts a dictionary. Keys are values to find. Values are replacements. It trims string values before matching, then performs replacements across the whole table.
+
+### Recommended use
+
+Use this for missing value markers, inconsistent labels, or repeated dirty values.
+
+### Example
+
+```python
+from eagle_eye_de.nodes import ReplaceValuesNode
+
+pipeline.Add(ReplaceValuesNode({
+    "UNKNOWN": "",
+    "N/A": "",
+    "United States": "USA",
+    "U.K.": "UK",
+}))
+```
+
+## FilterNode
+
+Includes or excludes rows or columns.
+
+### How it works
+
+`FilterNode` can target either rows or columns. It can match by values or by index positions.
+
+Main settings:
+
+- `Target`: `"rows"` or `"columns"`
+- `Mode`: `"include"` or `"exclude"`
+- `MatchMode`: `"or"` or `"and"`
+- `MatchValues`: values or indexes to match
+- `MatchBy`: `"values"` or `"index"`
+
+### Recommended use
+
+Use this when you want to keep or remove rows/columns based on specific values, markers, or positions.
+
+### Examples
+
+Keep rows containing `UK` or `USA`:
+
+```python
+from eagle_eye_de.nodes import FilterNode
+
+pipeline.Add(FilterNode(
+    Target="rows",
+    Mode="include",
+    MatchMode="or",
+    MatchValues=["UK", "USA"],
+    MatchBy="values",
+))
+```
+
+Remove columns containing a marker value:
+
+```python
+pipeline.Add(FilterNode(
+    Target="columns",
+    Mode="exclude",
+    MatchMode="or",
+    MatchValues=["DROP"],
+    MatchBy="values",
+))
+```
+
+Keep only columns 1 to 3:
+
+```python
+pipeline.Add(FilterNode(
+    Target="columns",
+    Mode="include",
+    MatchMode="or",
+    MatchValues=["1-3"],
+    MatchBy="index",
+))
+```
+
+## GenerateColumnNode
+
+Creates a new numeric column from existing columns.
+
+### How it works
+
+`GenerateColumnNode` takes a new column name, an arithmetic operator, and at least two source columns. It resolves column names flexibly, so normalised column names can still match the requested names.
+
+Supported operators:
+
+- `+`
+- `-`
+- `*`
+- `/`
+
+### Recommended use
+
+Use this when a dataset contains separate numeric fields that should be combined into a new calculated field.
+
+### Example
+
+```python
+from eagle_eye_de.nodes import GenerateColumnNode
+
+pipeline.Add(GenerateColumnNode(
+    "total_cost",
+    "*",
+    ["unit_price", "quantity"],
+))
+```
+
+## TypeConsistencyNode
+
+Finds columns with a dominant data type and handles values that do not match.
+
+### How it works
+
+The node checks each column and looks for a dominant type such as integer or float. It then tries to coerce values that can be corrected. For example, text numbers such as `five` or `fifty-seven` can be converted where possible.
+
+Values that cannot be safely corrected are treated as outliers.
+
+### Recommended use
+
+Use this after basic cleaning and normalisation. It is useful for catching values such as `burger` in a mostly numeric column.
+
+### Examples
+
+Flag unresolved outliers:
+
+```python
+from eagle_eye_de.nodes import TypeConsistencyNode
+
+pipeline.Add(TypeConsistencyNode(OutlierAction="highlight"))
+```
+
+Delete rows containing unresolved outliers:
+
+```python
+pipeline.Add(TypeConsistencyNode(OutlierAction="delete"))
+```
+
+## DropDuplicatesNode
+
+Removes duplicate rows.
+
+### How it works
+
+The node calls Pandas duplicate removal and returns the dataframe with repeated rows removed.
+
+### Recommended use
+
+Use this after normalising and replacing values, because dirty formatting can stop duplicates from matching.
+
+### Example
+
+```python
+from eagle_eye_de.nodes import DropDuplicatesNode
+
+pipeline.Add(DropDuplicatesNode())
+```
+
+You can also pass a subset of columns:
+
+```python
+pipeline.Add(DropDuplicatesNode(Subset=["customer_name", "email_address"]))
+```
+
+## WriteCsvNode
+
+Writes the processed dataframe to a CSV file.
+
+### How it works
+
+`WriteCsvNode` saves the current dataframe to disk. By default, it does not write the dataframe index.
+
+### Recommended use
+
+Use this as the final node in a code pipeline.
+
+### Example
+
+```python
+from eagle_eye_de.nodes import WriteCsvNode
+
+pipeline.Add(WriteCsvNode("cleaned_output.csv"))
+```
 
 ## Custom Nodes
 
-Custom nodes can be added by creating a class with a `Run` method:
+Custom nodes let you add project-specific logic without changing the library source code.
+
+### Basic custom node
 
 ```python
 class CustomerTierNode:
@@ -130,13 +423,13 @@ class CustomerTierNode:
         return Data
 ```
 
-Then add it to a pipeline:
+### Use it in code
 
 ```python
 pipeline.Add(CustomerTierNode(SpendThreshold=250))
 ```
 
-Custom nodes can also be passed to the visualiser:
+### Use it in the visualiser
 
 ```python
 from eagle_eye_de import LaunchVisualizer
@@ -144,26 +437,9 @@ from eagle_eye_de import LaunchVisualizer
 LaunchVisualizer(CustomNodes=[CustomerTierNode])
 ```
 
-## API Overview
+Custom nodes passed into the visualiser appear before the built-in nodes.
 
-Main imports:
-
-```python
-from eagle_eye_de import Pipeline, FormatRunReportForConsole, LaunchVisualizer
-from eagle_eye_de.nodes import ExtractCsvNode, NormalizeColumnsNode, WriteCsvNode
-```
-
-Core package areas:
-
-- `eagle_eye_de.core` contains the pipeline and reporting classes.
-- `eagle_eye_de.nodes.extract` contains CSV loading and table detection.
-- `eagle_eye_de.nodes.transform` contains cleaning and transformation nodes.
-- `eagle_eye_de.nodes.load` contains output/export nodes.
-- `eagle_eye_de.visualize` contains the Tkinter visualiser.
-
-## Examples
-
-A code-only cleaning pipeline:
+## Full Example Pipeline
 
 ```python
 from eagle_eye_de import FormatRunReportForConsole, Pipeline
@@ -177,7 +453,7 @@ from eagle_eye_de.nodes import (
     WriteCsvNode,
 )
 
-pipeline = Pipeline("Normal Code Method No UI")
+pipeline = Pipeline("Full Cleaning Pipeline")
 
 pipeline.Add(ExtractCsvNode("shoppers_dirty.csv"))
 pipeline.Add(NormalizeColumnsNode(Target="headers"))
@@ -196,13 +472,14 @@ pipeline.Add(FilterNode(
     MatchValues=["drop"],
 ))
 pipeline.Add(DropDuplicatesNode())
-pipeline.Add(WriteCsvNode("code_only_cleaned.csv"))
+pipeline.Add(WriteCsvNode("cleaned_output.csv"))
 
 report = pipeline.Run()
+
 print(FormatRunReportForConsole(report))
 ```
 
-Extract multiple tables from one messy CSV:
+## Multi-Table CSV Example
 
 ```python
 from eagle_eye_de import Pipeline
@@ -219,13 +496,22 @@ for table_number in (1, 2, 3):
     pipeline.Run()
 ```
 
-Launch the visualiser for normal UI use:
+## API Overview
+
+Main imports:
 
 ```python
-from eagle_eye_de import LaunchVisualizer
-
-LaunchVisualizer()
+from eagle_eye_de import Pipeline, FormatRunReportForConsole, LaunchVisualizer
+from eagle_eye_de.nodes import ExtractCsvNode, NormalizeColumnsNode, WriteCsvNode
 ```
+
+Package areas:
+
+- `eagle_eye_de.core` contains the pipeline and reporting classes.
+- `eagle_eye_de.nodes.extract` contains CSV loading and table detection.
+- `eagle_eye_de.nodes.transform` contains cleaning and transformation nodes.
+- `eagle_eye_de.nodes.load` contains output/export nodes.
+- `eagle_eye_de.visualize` contains the Tkinter visualiser.
 
 ## Links
 
