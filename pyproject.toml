@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eagle-eye-de"
-version = "1.0.21"
+version = "1.0.22"
 description = "A lightweight data engineering framework (nodes/visualization)."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -31,8 +31,8 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/S0MBRX/eagle-eye-de-library"
-Documentation = "https://github.com/S0MBRX/eagle-eye-de-library/tree/main/docs"
-"API Reference" = "https://github.com/S0MBRX/eagle-eye-de-library/tree/main/eagle_eye_de"
+Documentation = "https://github.com/S0MBRX/eagle-eye-de-library#eagleeyede"
+"API Reference" = "https://github.com/S0MBRX/eagle-eye-de-library#api-overview"
 Source = "https://github.com/S0MBRX/eagle-eye-de-library"
 Issues = "https://github.com/S0MBRX/eagle-eye-de-library/issues"
 

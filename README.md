@@ -2,12 +2,14 @@
 
 EagleEyeDE is a lightweight Python data engineering framework for building CSV cleaning pipelines from reusable nodes.
 
+TestPyPI project page: https://test.pypi.org/project/eagle-eye-de/
+
 It is designed for small to medium local ETL workflows where a full orchestration platform would be too heavy, but plain scripts would become difficult to maintain.
 
 ## Features
 
 - Build data cleaning pipelines in Python code.
-- Run reusable extract, transform, validate, and load nodes.
+- Run reusable extract, transform, and load nodes.
 - Add custom nodes for project-specific logic.
 - View execution reports with node timings and errors.
 - Launch a Tkinter visualiser for interactive pipeline building.
@@ -20,12 +22,6 @@ Install from PyPI or TestPyPI:
 
 ```bash
 pip install eagle-eye-de
-```
-
-For local development from a cloned repository:
-
-```bash
-pip install -e .
 ```
 
 ## Quick Start
@@ -93,7 +89,6 @@ EagleEyeDE includes nodes for common CSV data cleaning tasks:
 | `GenerateColumnNode` | Creates a new column from existing columns. |
 | `TypeConsistencyNode` | Detects dominant data types and handles outliers. |
 | `DropDuplicatesNode` | Removes duplicate rows. |
-| `ValidateRequiredColumnsNode` | Checks that required columns exist. |
 | `WriteCsvNode` | Writes processed data to a CSV file. |
 
 ## Extracting Tables From a Messy CSV
@@ -163,39 +158,78 @@ Core package areas:
 - `eagle_eye_de.core` contains the pipeline and reporting classes.
 - `eagle_eye_de.nodes.extract` contains CSV loading and table detection.
 - `eagle_eye_de.nodes.transform` contains cleaning and transformation nodes.
-- `eagle_eye_de.nodes.validate` contains validation nodes.
 - `eagle_eye_de.nodes.load` contains output/export nodes.
 - `eagle_eye_de.visualize` contains the Tkinter visualiser.
 
-## Development
+## Examples
 
-Install the project locally:
+A code-only cleaning pipeline:
 
-```bash
-pip install -e .
+```python
+from eagle_eye_de import FormatRunReportForConsole, Pipeline
+from eagle_eye_de.nodes import (
+    DropDuplicatesNode,
+    ExtractCsvNode,
+    FilterNode,
+    NormalizeColumnsNode,
+    ReplaceValuesNode,
+    TypeConsistencyNode,
+    WriteCsvNode,
+)
+
+pipeline = Pipeline("Normal Code Method No UI")
+
+pipeline.Add(ExtractCsvNode("shoppers_dirty.csv"))
+pipeline.Add(NormalizeColumnsNode(Target="headers"))
+pipeline.Add(NormalizeColumnsNode(Target="values"))
+pipeline.Add(ReplaceValuesNode({
+    "unknown": None,
+    "n/a": None,
+    "": None,
+    "united_states": "usa",
+}))
+pipeline.Add(TypeConsistencyNode(OutlierAction="highlight"))
+pipeline.Add(FilterNode(
+    Target="rows",
+    Mode="exclude",
+    MatchMode="or",
+    MatchValues=["drop"],
+))
+pipeline.Add(DropDuplicatesNode())
+pipeline.Add(WriteCsvNode("code_only_cleaned.csv"))
+
+report = pipeline.Run()
+print(FormatRunReportForConsole(report))
 ```
 
-Build the package:
+Extract multiple tables from one messy CSV:
 
-```bash
-python -m build --sdist --wheel
+```python
+from eagle_eye_de import Pipeline
+from eagle_eye_de.nodes import ExtractCsvNode, ExtractTableNode, NormalizeColumnsNode, WriteCsvNode
+
+for table_number in (1, 2, 3):
+    pipeline = Pipeline(f"Extract Table {table_number}")
+
+    pipeline.Add(ExtractCsvNode("multi_table_report.csv"))
+    pipeline.Add(ExtractTableNode(Table=str(table_number)))
+    pipeline.Add(NormalizeColumnsNode(Target="headers"))
+    pipeline.Add(WriteCsvNode(f"table_{table_number}_cleaned.csv"))
+
+    pipeline.Run()
 ```
 
-Upload with Twine:
+Launch the visualiser for normal UI use:
 
-```bash
-python -m twine upload dist/*
+```python
+from eagle_eye_de import LaunchVisualizer
+
+LaunchVisualizer()
 ```
 
-For TestPyPI:
-
-```bash
-python -m twine upload --repository testpypi dist/*
-```
-
-## Project Links
+## Links
 
 - Source: https://github.com/S0MBRX/eagle-eye-de-library
-- Documentation: https://github.com/S0MBRX/eagle-eye-de-library/tree/main/docs
-- API Reference: https://github.com/S0MBRX/eagle-eye-de-library/tree/main/eagle_eye_de
+- Documentation: https://github.com/S0MBRX/eagle-eye-de-library#eagleeyede
+- API Reference: https://github.com/S0MBRX/eagle-eye-de-library#api-overview
 - Issues: https://github.com/S0MBRX/eagle-eye-de-library/issues

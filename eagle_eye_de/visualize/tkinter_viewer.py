@@ -14,7 +14,6 @@ def LaunchVisualizer(CustomNodes=None):
         FilterNode,
         GenerateColumnNode,
         TypeConsistencyNode,
-        ValidateRequiredColumnsNode,
     )
     from eagle_eye_de.nodes.extract.csv import DetectCsvTables, ReadCsvRows
 
@@ -182,7 +181,6 @@ def LaunchVisualizer(CustomNodes=None):
     dropdup_var = tk.BooleanVar(value=False)
     filter_var = tk.BooleanVar(value=False)
     generate_var = tk.BooleanVar(value=False)
-    validate_var = tk.BooleanVar(value=False)
 
     extract_table_var = tk.StringVar(value="1")
     extract_table_recommendation_var = tk.StringVar(value="Example inputs: 1, 2, 3 or 4 etc.")
@@ -200,7 +198,6 @@ def LaunchVisualizer(CustomNodes=None):
     replace_rows = []
     filter_rows = []
     generate_rows = []
-    validate_rows = []
     operation_order = []
     customizing_order_index = None
     order_section_box = None
@@ -213,7 +210,6 @@ def LaunchVisualizer(CustomNodes=None):
         "Coerce Data Types",
         "Filter",
         "Generate Column",
-        "Validate Required Columns",
     }
     tunable_add_buttons = {}
     tunable_reset_buttons = {}
@@ -391,8 +387,6 @@ def LaunchVisualizer(CustomNodes=None):
         if name == "Generate Column":
             sources = ", ".join(meta.get("source_columns", []))
             return f"{meta.get('new_column', '')} = {sources}"
-        if name == "Validate Required Columns":
-            return f"{len(meta.get('validate_columns', []))} required"
         return ""
 
     def get_operation_config_lines(operation):
@@ -422,8 +416,6 @@ def LaunchVisualizer(CustomNodes=None):
                 f"operator: {meta.get('operator', '')}",
                 f"sources: {', '.join(meta.get('source_columns', []))}",
             ]
-        if name == "Validate Required Columns":
-            return [f"required: {', '.join(meta.get('validate_columns', []))}"]
         return []
 
     def is_configurable_operation(name):
@@ -435,7 +427,6 @@ def LaunchVisualizer(CustomNodes=None):
             "Coerce Data Types",
             "Filter",
             "Generate Column",
-            "Validate Required Columns",
         )
 
     def split_entry_list(raw):
@@ -515,8 +506,6 @@ def LaunchVisualizer(CustomNodes=None):
             flash_widget_red(generate_column_name_entry)
             flash_row_widgets(generate_rows, "entry")
             return True
-        if name == "Validate Required Columns":
-            return flash_row_widgets(validate_rows, "entry")
 
         return False
 
@@ -687,22 +676,6 @@ def LaunchVisualizer(CustomNodes=None):
                 )
 
             return save_generate_column
-
-        if name == "Validate Required Columns":
-            columns_var = tk.StringVar(value=", ".join(meta.get("validate_columns", [])))
-
-            ttk.Label(editor, text="required", style="Storm.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=1)
-            ttk.Entry(editor, textvariable=columns_var, width=28).grid(row=0, column=1, columnspan=3, sticky="ew", pady=1)
-
-            def save_validate_columns():
-                columns = split_entry_list(columns_var.get())
-                if not columns:
-                    messagebox.showerror("Missing Validate Config", "Validate Required Columns needs at least one column.")
-                    return
-
-                save_order_item_meta(row_index, {"validate_columns": columns})
-
-            return save_validate_columns
 
         return None
 
@@ -877,7 +850,6 @@ def LaunchVisualizer(CustomNodes=None):
             "Drop Duplicates": (lambda: dropdup_info, lambda: dropdup_toggle),
             "Filter": (lambda: filter_settings, lambda: filter_toggle),
             "Generate Column": (lambda: generate_settings, lambda: generate_toggle),
-            "Validate Required Columns": (lambda: validate_settings, lambda: validate_toggle),
         }
 
         if name not in mapping:
@@ -919,8 +891,6 @@ def LaunchVisualizer(CustomNodes=None):
                 and len(generate_rows) == 2
                 and row_values(generate_rows) == ["", ""]
             )
-        if name == "Validate Required Columns":
-            return len(validate_rows) == 1 and row_values(validate_rows) == [""]
         return True
 
     def pulse_tunable_add_button(name):
@@ -990,9 +960,6 @@ def LaunchVisualizer(CustomNodes=None):
                 generate_rows.clear()
                 add_generate_row()
                 add_generate_row()
-            elif name == "Validate Required Columns":
-                validate_rows.clear()
-                add_validate_row()
         finally:
             initializing_tunables = False
 
@@ -1695,18 +1662,6 @@ def LaunchVisualizer(CustomNodes=None):
                 },
             }
 
-        if name == "Validate Required Columns":
-            validate_cols = build_validate_columns()
-            if not validate_cols:
-                raise ValueError("Validate Required Columns needs at least one column before it can be added.")
-
-            return {
-                "name": name,
-                "meta": {
-                    "validate_columns": list(validate_cols),
-                },
-            }
-
         raise ValueError(f"Unknown node: {name}")
 
     def build_node_from_operation(operation):
@@ -1735,8 +1690,6 @@ def LaunchVisualizer(CustomNodes=None):
             )
         elif name == "Generate Column":
             node = GenerateColumnNode(meta["new_column"], meta["operator"], meta["source_columns"])
-        elif name == "Validate Required Columns":
-            node = ValidateRequiredColumnsNode(meta["validate_columns"])
         else:
             raise ValueError(f"Unknown node: {name}")
 
@@ -2008,9 +1961,6 @@ def LaunchVisualizer(CustomNodes=None):
                     for row_position, row_label in enumerate(previous_df.index)
                     if (row_label not in matching_labels if mode == "include" else row_label in matching_labels)
                 }
-            return diff
-
-        if step_name == "Validate Required Columns":
             return diff
 
         if step_name == "Generate Column":
@@ -2417,55 +2367,6 @@ def LaunchVisualizer(CustomNodes=None):
     def build_generate_columns():
         cols = []
         for row_data in generate_rows:
-            value = row_data["value_var"].get().strip()
-            if value:
-                cols.append(value)
-        return cols
-
-    def refresh_validate_rows():
-        for child in validate_rows_frame.winfo_children():
-            child.destroy()
-
-        for row_index, row_data in enumerate(validate_rows):
-            row_frame = ttk.Frame(validate_rows_frame, style="StormPanel.TFrame")
-            row_frame.grid(row=row_index, column=0, sticky="ew", pady=2)
-            row_frame.grid_columnconfigure(0, weight=1)
-
-            entry = ttk.Entry(row_frame, textvariable=row_data["value_var"])
-            entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-            row_data["entry"] = entry
-
-            ttk.Button(
-                row_frame,
-                text="X",
-                width=3,
-                style="Small.TButton",
-                command=lambda idx=row_index: delete_validate_row(idx)
-            ).grid(row=0, column=1, sticky="e")
-
-    def add_validate_row(value=""):
-        value_var = tk.StringVar(value=value)
-        value_var.trace_add("write", lambda *args: mark_tuneables_changed("Validate Required Columns"))
-        row_data = {
-            "value_var": value_var,
-        }
-        validate_rows.append(row_data)
-        refresh_validate_rows()
-        mark_tuneables_changed("Validate Required Columns")
-
-    def delete_validate_row(index):
-        if 0 <= index < len(validate_rows):
-            del validate_rows[index]
-
-        if not validate_rows:
-            add_validate_row()
-        else:
-            refresh_validate_rows()
-            mark_tuneables_changed("Validate Required Columns")
-
-    def build_validate_columns():
-        cols = []
-        for row_data in validate_rows:
             value = row_data["value_var"].get().strip()
             if value:
                 cols.append(value)
@@ -3177,63 +3078,6 @@ def LaunchVisualizer(CustomNodes=None):
 
     node_row += 1
 
-    validate_box = ttk.Frame(nodes_box, style="StormPanel.TFrame")
-    validate_box.grid(row=node_row, column=0, sticky="ew", pady=(0, 6))
-    validate_box.grid_columnconfigure(0, weight=1)
-
-    validate_header = ttk.Frame(validate_box, style="StormPanel.TFrame")
-    validate_header.grid(row=0, column=0, sticky="ew")
-    validate_header.grid_columnconfigure(1, weight=1)
-    validate_add_button = ttk.Button(
-        validate_header,
-        text="+ add",
-        width=5,
-        style="Add.TButton",
-        command=lambda: add_order_item("Validate Required Columns"),
-    )
-    validate_add_button.grid(row=0, column=0, sticky="w", padx=(0, 6))
-    tunable_add_buttons["Validate Required Columns"] = validate_add_button
-    validate_toggle = ttk.Button(validate_header, text=format_node_toggle_text("Validate Required Columns", False), style="NodeToggle.TButton")
-    validate_toggle.grid(row=0, column=1, sticky="ew")
-    validate_toggle.configure(command=lambda: toggle_settings(validate_settings, validate_toggle, "Validate Required Columns"))
-    validate_reset_button = ttk.Button(
-        validate_header,
-        text="\u21b6",
-        width=3,
-        style="Small.TButton",
-        command=lambda: reset_tuneables("Validate Required Columns")
-    )
-    validate_reset_button.grid(row=0, column=2, sticky="e", padx=(6, 0))
-    validate_reset_button.grid_remove()
-    tunable_reset_buttons["Validate Required Columns"] = validate_reset_button
-
-    validate_settings = ttk.Frame(validate_box, padding=(24, 6, 0, 0), style="StormPanel.TFrame")
-    validate_settings.grid(row=1, column=0, sticky="ew")
-    validate_settings.grid_columnconfigure(0, weight=1)
-
-    ttk.Label(
-        validate_settings,
-        text="Checks that these columns exist at this point in the run. It does not change the table; it stops the run if any are missing.",
-        style="Storm.TLabel",
-        wraplength=360,
-        justify="left"
-    ).grid(row=0, column=0, sticky="w", pady=(0, 6))
-
-    ttk.Label(validate_settings, text="Columns that must exist", style="Storm.TLabel").grid(row=1, column=0, sticky="w")
-
-    validate_rows_frame = ttk.Frame(validate_settings, style="StormPanel.TFrame")
-    validate_rows_frame.grid(row=2, column=0, sticky="ew")
-    validate_rows_frame.grid_columnconfigure(0, weight=1)
-
-    ttk.Button(
-        validate_settings,
-        text="+ Add Row",
-        style="Small.TButton",
-        command=add_validate_row
-    ).grid(row=3, column=0, sticky="w", pady=(6, 0))
-
-    node_row += 1
-
     builtin_row_offset = len(custom_node_specs)
     extract_table_box.grid_configure(row=builtin_row_offset)
     normalize_box.grid_configure(row=builtin_row_offset + 1)
@@ -3242,7 +3086,6 @@ def LaunchVisualizer(CustomNodes=None):
     replace_box.grid_configure(row=builtin_row_offset + 4)
     generate_box.grid_configure(row=builtin_row_offset + 5)
     dropdup_box.grid_configure(row=builtin_row_offset + 6)
-    validate_box.grid_remove()
 
     show_section(extract_table_settings, False)
     show_section(normalize_info, False)
@@ -3257,7 +3100,6 @@ def LaunchVisualizer(CustomNodes=None):
     on_filter_mode_changed()
     add_generate_row()
     add_generate_row()
-    add_validate_row()
     refresh_order_rows()
 
     bottom = ttk.Frame(root, padding=(10, 0, 10, 14), style="Storm.TFrame")
