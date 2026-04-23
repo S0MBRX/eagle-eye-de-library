@@ -2,7 +2,7 @@
 
 EagleEyeDE is a lightweight Python data engineering framework for building CSV cleaning pipelines from reusable nodes.
 
-TestPyPI project page: https://test.pypi.org/project/eagle-eye-de/
+<strong><span style="color: purple;">API HERE</span></strong> - TestPyPI project page: https://test.pypi.org/project/eagle-eye-de/
 
 It is designed for small to medium local ETL workflows where a full orchestration platform would be too heavy, but plain scripts would become difficult to maintain.
 
