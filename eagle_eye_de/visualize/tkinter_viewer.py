@@ -7,6 +7,7 @@ def LaunchVisualizer(CustomNodes=None):
 
     from eagle_eye_de.nodes import (
         ExtractCsvNode,
+        ExtractTableNode,
         NormalizeColumnsNode,
         ReplaceValuesNode,
         DropDuplicatesNode,
@@ -15,7 +16,7 @@ def LaunchVisualizer(CustomNodes=None):
         TypeConsistencyNode,
         ValidateRequiredColumnsNode,
     )
-    from eagle_eye_de.nodes.extract.csv import ReadCsvRows
+    from eagle_eye_de.nodes.extract.csv import DetectCsvTables, ReadCsvRows
 
     root = tk.Tk()
     root.title("EagleEyeDE Visualizer")
@@ -183,6 +184,9 @@ def LaunchVisualizer(CustomNodes=None):
     generate_var = tk.BooleanVar(value=False)
     validate_var = tk.BooleanVar(value=False)
 
+    extract_table_var = tk.StringVar(value="1")
+    extract_table_recommendation_var = tk.StringVar(value="Example inputs: 1, 2, 3 or 4 etc.")
+    extract_table_entry = None
     normalize_target_var = tk.StringVar(value="all cells")
     type_outlier_action_var = tk.StringVar(value="highlight")
     filter_target_var = tk.StringVar(value="rows")
@@ -203,6 +207,7 @@ def LaunchVisualizer(CustomNodes=None):
     order_pulse_job = None
     order_pulse_index = 0
     tunable_nodes = {
+        "Extract Table",
         "Normalize",
         "Replace Values",
         "Coerce Data Types",
@@ -274,7 +279,29 @@ def LaunchVisualizer(CustomNodes=None):
         )
         if path:
             input_var.set(path)
+            update_extract_table_recommendation(path)
             refresh_preview()
+
+    def update_extract_table_recommendation(path=None):
+        path = path or input_var.get().strip()
+        if not path:
+            extract_table_recommendation_var.set("Example inputs: 1, 2, 3 or 4 etc.")
+            return
+
+        try:
+            tables = DetectCsvTables(path)
+        except Exception:
+            extract_table_recommendation_var.set("Example inputs: 1, 2, 3 or 4 etc.")
+            return
+
+        if not tables:
+            extract_table_recommendation_var.set("Example inputs: 1, 2, 3 or 4 etc.")
+            return
+
+        table_numbers = ", ".join(str(table["index"]) for table in tables)
+        extract_table_recommendation_var.set(f"Example inputs: {table_numbers}")
+        if not extract_table_var.get().strip():
+            extract_table_var.set("1")
 
     def pulse_browse_button():
         nonlocal browse_pulse_index
@@ -351,6 +378,8 @@ def LaunchVisualizer(CustomNodes=None):
 
         if name in ("Normalize", "Normalize Columns"):
             return normalize_target_label(meta.get("normalize_target", "headers"))
+        if name == "Extract Table":
+            return f"table {meta.get('extract_table', '1')}"
         if name == "Replace Values":
             return f"{len(meta.get('replace_map', {}))} pairs"
         if name == "Coerce Data Types":
@@ -372,6 +401,8 @@ def LaunchVisualizer(CustomNodes=None):
 
         if name in ("Normalize", "Normalize Columns"):
             return [f"target: {normalize_target_label(meta.get('normalize_target', 'headers'))}"]
+        if name == "Extract Table":
+            return [f"table: {meta.get('extract_table', '1')}"]
         if name == "Replace Values":
             return [f"{old} -> {new}" for old, new in meta.get("replace_map", {}).items()]
         if name == "Coerce Data Types":
@@ -397,6 +428,7 @@ def LaunchVisualizer(CustomNodes=None):
 
     def is_configurable_operation(name):
         return name in (
+            "Extract Table",
             "Normalize",
             "Normalize Columns",
             "Replace Values",
@@ -468,6 +500,11 @@ def LaunchVisualizer(CustomNodes=None):
     def flash_missing_inputs(name):
         set_settings_visible(name, True)
 
+        if name == "Extract Table":
+            if extract_table_entry is not None:
+                flash_widget_red(extract_table_entry)
+                return True
+            return False
         if name == "Replace Values":
             return flash_row_widgets(replace_rows, "from_entry", "to_entry")
         if name == "Coerce Data Types":
@@ -507,6 +544,20 @@ def LaunchVisualizer(CustomNodes=None):
                 save_order_item_meta(row_index, {"normalize_target": normalize_target_key(target_var.get())})
 
             return save_normalize
+
+        if name == "Extract Table":
+            table_var = tk.StringVar(value=str(meta.get("extract_table", "1")))
+            ttk.Label(editor, text="table", style="Storm.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=1)
+            ttk.Entry(editor, textvariable=table_var, width=10).grid(row=0, column=1, sticky="w", pady=1)
+
+            def save_extract_table():
+                table = table_var.get().strip()
+                if not table:
+                    messagebox.showerror("Missing Extract Table Config", "Extract Table needs a table number.")
+                    return
+                save_order_item_meta(row_index, {"extract_table": table})
+
+            return save_extract_table
 
         if name == "Replace Values":
             replace_vars = []
@@ -818,6 +869,7 @@ def LaunchVisualizer(CustomNodes=None):
 
     def set_settings_visible(name, visible):
         mapping = {
+            "Extract Table": (lambda: extract_table_settings, lambda: extract_table_toggle),
             "Normalize": (lambda: normalize_info, lambda: normalize_toggle),
             "Normalize Columns": (lambda: normalize_info, lambda: normalize_toggle),
             "Replace Values": (lambda: replace_settings, lambda: replace_toggle),
@@ -843,6 +895,8 @@ def LaunchVisualizer(CustomNodes=None):
         return [row_data[key].get().strip() for row_data in rows]
 
     def tuneables_are_default(name):
+        if name == "Extract Table":
+            return extract_table_var.get().strip() == "1"
         if name in ("Normalize", "Normalize Columns"):
             return normalize_target_key(normalize_target_var.get()) == "values"
         if name == "Replace Values":
@@ -913,7 +967,9 @@ def LaunchVisualizer(CustomNodes=None):
 
         initializing_tunables = True
         try:
-            if name in ("Normalize", "Normalize Columns"):
+            if name == "Extract Table":
+                extract_table_var.set("1")
+            elif name in ("Normalize", "Normalize Columns"):
                 normalize_target_var.set("all cells")
             elif name == "Replace Values":
                 replace_rows.clear()
@@ -945,6 +1001,7 @@ def LaunchVisualizer(CustomNodes=None):
     def mark_tuneables_changed(name):
         refresh_tunable_add_state(name)
 
+    extract_table_var.trace_add("write", lambda *args: mark_tuneables_changed("Extract Table"))
     normalize_target_var.trace_add("write", lambda *args: mark_tuneables_changed("Normalize"))
     type_outlier_action_var.trace_add("write", lambda *args: mark_tuneables_changed("Coerce Data Types"))
     filter_target_var.trace_add("write", lambda *args: mark_tuneables_changed("Filter"))
@@ -1551,6 +1608,17 @@ def LaunchVisualizer(CustomNodes=None):
                 },
             }
 
+        if name == "Extract Table":
+            table = extract_table_var.get().strip()
+            if not table:
+                raise ValueError("Extract Table needs a table number before it can be added.")
+            return {
+                "name": name,
+                "meta": {
+                    "extract_table": table,
+                },
+            }
+
         if name == "Replace Values":
             replace_map = build_replace_map()
             if not replace_map:
@@ -1647,6 +1715,8 @@ def LaunchVisualizer(CustomNodes=None):
 
         if name in custom_node_specs:
             node = create_custom_node(custom_node_specs[name])
+        elif name == "Extract Table":
+            node = ExtractTableNode(Table=meta.get("extract_table", "1"))
         elif name in ("Normalize", "Normalize Columns"):
             node = NormalizeColumnsNode(Target=meta.get("normalize_target", "headers"))
         elif name == "Replace Values":
@@ -1714,6 +1784,12 @@ def LaunchVisualizer(CustomNodes=None):
             expected = list(range(1, len(df.columns) + 1))
             columns = list(df.columns)
             return columns == expected or [str(column) for column in columns] == [str(column) for column in expected]
+
+        if step_name == "Extract Table":
+            diff["added_columns"] = list(curr_columns)
+            diff["added_column_cells"] = set(curr_columns)
+            diff["added_rows"] = set(range(len(curr)))
+            return diff
 
         if step_name in ("Normalize", "Normalize Columns"):
             target = normalize_target_key(meta.get("normalize_target", "headers"))
@@ -2653,6 +2729,68 @@ def LaunchVisualizer(CustomNodes=None):
         add_custom_node_card(custom_display_name, custom_spec, node_row)
         node_row += 1
 
+    extract_table_box = ttk.Frame(nodes_box, style="StormPanel.TFrame")
+    extract_table_box.grid(row=node_row, column=0, sticky="ew", pady=(0, 6))
+    extract_table_box.grid_columnconfigure(0, weight=1)
+
+    extract_table_header = ttk.Frame(extract_table_box, style="StormPanel.TFrame")
+    extract_table_header.grid(row=0, column=0, sticky="ew")
+    extract_table_header.grid_columnconfigure(1, weight=1)
+    extract_table_add_button = ttk.Button(
+        extract_table_header,
+        text="+ add",
+        width=5,
+        style="Add.TButton",
+        command=lambda: add_order_item("Extract Table")
+    )
+    extract_table_add_button.grid(row=0, column=0, sticky="w", padx=(0, 6))
+    tunable_add_buttons["Extract Table"] = extract_table_add_button
+    extract_table_toggle = ttk.Button(
+        extract_table_header,
+        text=format_node_toggle_text("Extract Table", False),
+        style="NodeToggle.TButton"
+    )
+    extract_table_toggle.grid(row=0, column=1, sticky="ew")
+    extract_table_toggle.configure(command=lambda: toggle_settings(extract_table_settings, extract_table_toggle, "Extract Table"))
+    extract_table_reset_button = ttk.Button(
+        extract_table_header,
+        text="\u21b6",
+        width=3,
+        style="Small.TButton",
+        command=lambda: reset_tuneables("Extract Table")
+    )
+    extract_table_reset_button.grid(row=0, column=2, sticky="e", padx=(6, 0))
+    extract_table_reset_button.grid_remove()
+    tunable_reset_buttons["Extract Table"] = extract_table_reset_button
+
+    extract_table_settings = ttk.Frame(extract_table_box, padding=(24, 6, 0, 0), style="StormPanel.TFrame")
+    extract_table_settings.grid(row=1, column=0, sticky="ew")
+    extract_table_settings.grid_columnconfigure(0, weight=0)
+    extract_table_settings.grid_columnconfigure(1, weight=1)
+    ttk.Label(
+        extract_table_settings,
+        text="Pulls one detected table out of a report-style CSV that has metadata, spacer rows, or multiple tables.",
+        style="Storm.TLabel",
+        wraplength=360,
+        justify="left"
+    ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+    ttk.Label(extract_table_settings, text="Table", style="Storm.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 8))
+    extract_table_entry = ttk.Entry(
+        extract_table_settings,
+        textvariable=extract_table_var,
+        width=10
+    )
+    extract_table_entry.grid(row=1, column=1, sticky="w")
+    ttk.Label(
+        extract_table_settings,
+        textvariable=extract_table_recommendation_var,
+        style="Storm.TLabel",
+        wraplength=360,
+        justify="left"
+    ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(5, 0))
+
+    node_row += 1
+
     normalize_box = ttk.Frame(nodes_box, style="StormPanel.TFrame")
     normalize_box.grid(row=node_row, column=0, sticky="ew", pady=(0, 6))
     normalize_box.grid_columnconfigure(0, weight=1)
@@ -3097,14 +3235,16 @@ def LaunchVisualizer(CustomNodes=None):
     node_row += 1
 
     builtin_row_offset = len(custom_node_specs)
-    normalize_box.grid_configure(row=builtin_row_offset)
-    type_box.grid_configure(row=builtin_row_offset + 1)
-    filter_box.grid_configure(row=builtin_row_offset + 2)
-    replace_box.grid_configure(row=builtin_row_offset + 3)
-    generate_box.grid_configure(row=builtin_row_offset + 4)
-    dropdup_box.grid_configure(row=builtin_row_offset + 5)
+    extract_table_box.grid_configure(row=builtin_row_offset)
+    normalize_box.grid_configure(row=builtin_row_offset + 1)
+    type_box.grid_configure(row=builtin_row_offset + 2)
+    filter_box.grid_configure(row=builtin_row_offset + 3)
+    replace_box.grid_configure(row=builtin_row_offset + 4)
+    generate_box.grid_configure(row=builtin_row_offset + 5)
+    dropdup_box.grid_configure(row=builtin_row_offset + 6)
     validate_box.grid_remove()
 
+    show_section(extract_table_settings, False)
     show_section(normalize_info, False)
     show_section(replace_settings, False)
     show_section(type_settings, False)

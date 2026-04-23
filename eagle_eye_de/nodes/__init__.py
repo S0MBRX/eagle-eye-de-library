@@ -1,4 +1,12 @@
-from .extract import ExtractCsvNode
+from .extract import (
+    DetectCsvTables,
+    DetectCsvTablesFromRows,
+    ExtractCsvNode,
+    ReadCsvRawRows,
+    ReadCsvRows,
+    ReadCsvTable,
+    ReadCsvTableFromRows,
+)
 from .transform import (
     NormalizeColumnsNode,
     DropDuplicatesNode,
@@ -8,12 +16,19 @@ from .transform import (
     RowFilterNode,
     GenerateColumnNode,
     TypeConsistencyNode,
+    ExtractTableNode,
 )
 from .validate import ValidateRequiredColumnsNode
 from .load import WriteCsvNode
 
 __all__ = [
     "ExtractCsvNode",
+    "DetectCsvTables",
+    "DetectCsvTablesFromRows",
+    "ReadCsvRawRows",
+    "ReadCsvRows",
+    "ReadCsvTable",
+    "ReadCsvTableFromRows",
     "NormalizeColumnsNode",
     "DropDuplicatesNode",
     "ReplaceValuesNode",
@@ -22,6 +37,7 @@ __all__ = [
     "RowFilterNode",
     "GenerateColumnNode",
     "TypeConsistencyNode",
+    "ExtractTableNode",
     "ValidateRequiredColumnsNode",
     "WriteCsvNode",
 ]

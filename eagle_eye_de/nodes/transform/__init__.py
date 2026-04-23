@@ -6,6 +6,7 @@ from .column_filter import ColumnFilterNode
 from .row_filter import RowFilterNode
 from .generate_column import GenerateColumnNode
 from .type_consistency import TypeConsistencyNode
+from .extract_table import ExtractTableNode
 
 __all__ = [
     "NormalizeColumnsNode",
@@ -16,4 +17,5 @@ __all__ = [
     "RowFilterNode",
     "GenerateColumnNode",
     "TypeConsistencyNode",
+    "ExtractTableNode",
 ]
