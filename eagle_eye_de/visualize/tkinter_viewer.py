@@ -1,4 +1,4 @@
-def LaunchVisualizer():
+def LaunchVisualizer(CustomNodes=None):
     import ast
     import os
     import time
@@ -34,6 +34,7 @@ def LaunchVisualizer():
     green_active = "#4DB65B"
     red = "#B64242"
     red_active = "#C75252"
+    custom_purple = "#D7B6FF"
 
     def blend_hex(left, right, amount):
         left = left.lstrip("#")
@@ -50,6 +51,7 @@ def LaunchVisualizer():
     style.configure("Storm.TLabelframe", background=panel_blue)
     style.configure("Storm.TLabelframe.Label", background=panel_blue, foreground="white")
     style.configure("Storm.TLabel", background=panel_blue, foreground="white")
+    style.configure("CustomStorm.TLabel", background=panel_blue, foreground=custom_purple)
     style.configure("StormTop.TLabel", background=storm_blue, foreground="white")
     style.configure("ProcessedTitle.TLabel", background=storm_blue, foreground="white", font=("Arial", 30, "bold"))
     style.configure("ProcessedFinalTitle.TLabel", background=storm_blue, foreground=green, font=("Arial", 30, "bold"))
@@ -96,6 +98,19 @@ def LaunchVisualizer():
         "NodeToggle.TButton",
         background=[("active", panel_blue), ("pressed", panel_blue)],
         foreground=[("active", "white"), ("pressed", "white")],
+    )
+    style.configure(
+        "CustomNodeToggle.TButton",
+        padding=(6, 3),
+        background=panel_blue,
+        foreground=custom_purple,
+        borderwidth=0,
+        anchor="w",
+    )
+    style.map(
+        "CustomNodeToggle.TButton",
+        background=[("active", panel_blue), ("pressed", panel_blue)],
+        foreground=[("active", custom_purple), ("pressed", custom_purple)],
     )
     style.configure(
         "Add.TButton",
@@ -216,6 +231,41 @@ def LaunchVisualizer():
     processed_play_job = None
     processed_is_playing = False
     processed_play_button = None
+
+    def get_custom_node_label(node_source):
+        if isinstance(node_source, dict):
+            label = node_source.get("label") or node_source.get("name")
+            node_source = node_source.get("node") or node_source.get("class") or node_source.get("factory")
+            if label:
+                return str(label)
+
+        return str(getattr(node_source, "Name", getattr(node_source, "__name__", node_source.__class__.__name__)))
+
+    custom_node_specs = {}
+    for custom_node in (CustomNodes or []):
+        node_source = custom_node
+        label = get_custom_node_label(custom_node)
+        if isinstance(custom_node, dict):
+            node_source = custom_node.get("node") or custom_node.get("class") or custom_node.get("factory")
+
+        if node_source is None:
+            continue
+
+        display_name = f"{label} (custom)"
+        custom_node_specs[display_name] = {
+            "label": label,
+            "source": node_source,
+        }
+
+    custom_node_names = set(custom_node_specs)
+
+    def create_custom_node(spec):
+        source = spec["source"]
+        if isinstance(source, type):
+            return source()
+        if callable(source) and not hasattr(source, "Run"):
+            return source()
+        return source
 
     def choose_input():
         path = filedialog.askopenfilename(
@@ -658,7 +708,7 @@ def LaunchVisualizer():
             title_label = ttk.Label(
                 row_frame,
                 text=text,
-                style="Storm.TLabel"
+                style="CustomStorm.TLabel" if operation["name"] in custom_node_names else "Storm.TLabel"
             )
             title_label.grid(row=0, column=0, sticky="w", padx=(0, 6))
 
@@ -673,7 +723,7 @@ def LaunchVisualizer():
                 ttk.Label(
                     row_frame,
                     text=config_text,
-                    style="Storm.TLabel",
+                    style="CustomStorm.TLabel" if operation["name"] in custom_node_names else "Storm.TLabel",
                     justify="left",
                     wraplength=260
                 ).grid(row=1, column=0, sticky="w", padx=(18, 6), pady=(2, 0))
@@ -1484,6 +1534,14 @@ def LaunchVisualizer():
         return ReadCsvRows(input_path).head(50)
 
     def build_operation_snapshot(name):
+        if name in custom_node_specs:
+            return {
+                "name": name,
+                "meta": {
+                    "custom_node": True,
+                },
+            }
+
         if name in ("Normalize", "Normalize Columns"):
             target = normalize_target_key(normalize_target_var.get())
             return {
@@ -1587,7 +1645,9 @@ def LaunchVisualizer():
         name = operation["name"]
         meta = operation["meta"]
 
-        if name in ("Normalize", "Normalize Columns"):
+        if name in custom_node_specs:
+            node = create_custom_node(custom_node_specs[name])
+        elif name in ("Normalize", "Normalize Columns"):
             node = NormalizeColumnsNode(Target=meta.get("normalize_target", "headers"))
         elif name == "Replace Values":
             node = ReplaceValuesNode(meta["replace_map"])
@@ -1884,6 +1944,26 @@ def LaunchVisualizer():
             else:
                 diff["added_columns"] = []
             diff["added_column_cells"] = set(diff["added_columns"])
+            return diff
+
+        if meta.get("custom_node"):
+            diff["added_columns"] = [col for col in curr_columns if col not in prev_columns]
+            diff["deleted_columns"] = [col for col in prev_columns if col not in curr_columns]
+            diff["added_column_cells"] = set(diff["added_columns"])
+
+            shared_columns = [col for col in curr_columns if col in prev_columns]
+            for row_index in range(min(len(prev), len(curr))):
+                for column_name in shared_columns:
+                    old_value = prev.at[row_index, column_name]
+                    new_value = curr.at[row_index, column_name]
+                    if not values_equal(old_value, new_value):
+                        color_key = (row_index, column_name)
+                        diff["modified_cells"].add(color_key)
+                        diff["modified_old_values"][color_key] = old_value
+            if len(prev) > len(curr):
+                diff["deleted_rows"] = set(range(len(curr), len(prev)))
+            elif len(curr) > len(prev):
+                diff["added_rows"] = set(range(len(prev), len(curr)))
             return diff
 
         return diff
@@ -2531,6 +2611,48 @@ def LaunchVisualizer():
 
     node_row = 0
 
+    def add_custom_node_card(display_name, spec, row):
+        custom_box = ttk.Frame(nodes_box, style="StormPanel.TFrame")
+        custom_box.grid(row=row, column=0, sticky="ew", pady=(0, 6))
+        custom_box.grid_columnconfigure(0, weight=1)
+
+        custom_header = ttk.Frame(custom_box, style="StormPanel.TFrame")
+        custom_header.grid(row=0, column=0, sticky="ew")
+        custom_header.grid_columnconfigure(1, weight=1)
+
+        ttk.Button(
+            custom_header,
+            text="+ add",
+            width=5,
+            style="Add.TButton",
+            command=lambda node_name=display_name: add_order_item(node_name)
+        ).grid(row=0, column=0, sticky="w", padx=(0, 6))
+
+        custom_toggle = ttk.Button(
+            custom_header,
+            text=f"{display_name} v",
+            style="CustomNodeToggle.TButton"
+        )
+        custom_toggle.grid(row=0, column=1, sticky="ew")
+
+        custom_info = ttk.Frame(custom_box, padding=(24, 6, 0, 0), style="StormPanel.TFrame")
+        custom_info.grid(row=1, column=0, sticky="ew")
+        ttk.Label(
+            custom_info,
+            text="Custom node supplied by this project. It runs with its default constructor settings.",
+            style="CustomStorm.TLabel",
+            wraplength=360,
+            justify="left"
+        ).grid(row=0, column=0, sticky="w")
+        custom_toggle.configure(
+            command=lambda frame=custom_info, button=custom_toggle, label=display_name: toggle_settings(frame, button, label)
+        )
+        show_section(custom_info, False)
+
+    for custom_display_name, custom_spec in custom_node_specs.items():
+        add_custom_node_card(custom_display_name, custom_spec, node_row)
+        node_row += 1
+
     normalize_box = ttk.Frame(nodes_box, style="StormPanel.TFrame")
     normalize_box.grid(row=node_row, column=0, sticky="ew", pady=(0, 6))
     normalize_box.grid_columnconfigure(0, weight=1)
@@ -2974,12 +3096,13 @@ def LaunchVisualizer():
 
     node_row += 1
 
-    normalize_box.grid_configure(row=0)
-    type_box.grid_configure(row=1)
-    filter_box.grid_configure(row=2)
-    replace_box.grid_configure(row=3)
-    generate_box.grid_configure(row=4)
-    dropdup_box.grid_configure(row=5)
+    builtin_row_offset = len(custom_node_specs)
+    normalize_box.grid_configure(row=builtin_row_offset)
+    type_box.grid_configure(row=builtin_row_offset + 1)
+    filter_box.grid_configure(row=builtin_row_offset + 2)
+    replace_box.grid_configure(row=builtin_row_offset + 3)
+    generate_box.grid_configure(row=builtin_row_offset + 4)
+    dropdup_box.grid_configure(row=builtin_row_offset + 5)
     validate_box.grid_remove()
 
     show_section(normalize_info, False)
